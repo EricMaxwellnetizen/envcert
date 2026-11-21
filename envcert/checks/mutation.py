@@ -140,21 +140,69 @@ def _count_sites(tree: ast.AST) -> int:
     return n
 
 
+def _coverage_map(task_root: Path, runner: LocalPythonRunner, timeout: int = 60) -> dict | None:
+    """Executed lines per solution filename from a gold run under coverage.py.
+
+    Returns None when coverage.py is unavailable so mutation degrades to the
+    pre-coverage behaviour instead of failing.
+    """
+    import json as _json
+    import subprocess
+    import sys
+
+    try:
+        import coverage  # noqa: F401
+    except ImportError:
+        return None
+    with tempfile.TemporaryDirectory(prefix="envcert-cov-") as td:
+        ws = runner.prepare_workspace(task_root, Path(td) / "ws", "gold")
+        env = {"PATH": "", "PYTHONDONTWRITEBYTECODE": "1"}
+        import os
+
+        env["PATH"] = os.environ.get("PATH", "")
+        if os.name == "nt":
+            env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+        try:
+            r1 = subprocess.run([sys.executable, "-m", "coverage", "run", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+                                cwd=str(ws), env=env, capture_output=True, text=True, timeout=timeout)
+            if r1.returncode != 0:
+                return None
+            subprocess.run([sys.executable, "-m", "coverage", "json", "-o", "cov.json"],
+                           cwd=str(ws), env=env, capture_output=True, text=True, timeout=timeout)
+            data = _json.loads((ws / "cov.json").read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    out: dict[str, set] = {}
+    for fname, fdata in (data.get("files") or {}).items():
+        out[Path(fname).name] = set(fdata.get("executed_lines") or [])
+    return out
+
+
+def _site_line(applied: str) -> int | None:
+    import re
+
+    m = re.search(r"\(line (\d+)\)", applied)
+    return int(m.group(1)) if m else None
+
+
 def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> dict:
     task_root = Path(task_root)
     runner = LocalPythonRunner()
     mutants: list[dict] = []
     eligible = rejected = survived = invalid = 0
+    uncovered = 0
     notes = ""
     sol_files = sorted((task_root / "solution").rglob("*.py")) if (task_root / "solution").is_dir() else []
+    coverage_map: dict | None = None
     if not sol_files:
-        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "rejection_rate": None,
-                "mutants": [], "notes": "no solution/*.py files"}
+        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "rejection_rate": None,
+                "mutants": [], "notes": "no solution/*.py files", "coverage_used": False}
+    coverage_map = _coverage_map(task_root, runner, timeout=timeout)
     # gold must pass first, otherwise mutants are meaningless
     gold = runner.run_task(task_root, "gold", timeout=timeout)
     if not gold.ok:
-        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "rejection_rate": None,
-                "mutants": [], "notes": "gold solution does not pass; mutation skipped"}
+        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "rejection_rate": None,
+                "mutants": [], "notes": "gold solution does not pass; mutation skipped", "coverage_used": coverage_map is not None}
     budget = max_mutants
     for sol in sol_files:
         if budget <= 0:
@@ -174,6 +222,13 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
             if not mut.applied:
                 continue
             budget -= 1
+            line_no = _site_line(mut.applied)
+            if coverage_map is not None and line_no is not None and sol.name in coverage_map and line_no not in coverage_map[sol.name]:
+                uncovered += 1
+                mutants.append({"file": sol.name, "change": mut.applied, "outcome": "uncovered-inconclusive",
+                                "possible_equivalent": mut.possible_equivalent,
+                                "note": "mutated line is not executed by the verifier on the gold run (coverage); excluded from the rejection rate"})
+                continue
             try:
                 mutated = ast.unparse(ast.fix_missing_locations(new_tree))
                 ast.parse(mutated)
@@ -203,5 +258,6 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
                             "note": "mutation is inside a print/logging call; survival may be equivalent" if possible_equiv else ""})
     rate = (rejected / eligible) if eligible else None
     return {"eligible": eligible, "rejected": rejected, "survived": survived, "invalid": invalid,
-            "rejection_rate": rate, "mutants": mutants,
+            "uncovered": uncovered,
+            "rejection_rate": rate, "mutants": mutants, "coverage_used": coverage_map is not None,
             "notes": notes or "equivalent mutants may inflate the survived count; print/logging-only mutants are tagged possible_equivalent; interpret as a signal only"}

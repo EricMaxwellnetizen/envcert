@@ -19,6 +19,7 @@ from envcert.checks.base import REGISTRY
 from envcert.core.config import PROFILES, load_settings
 from envcert.core.engine import run_checks
 from envcert.core.errors import EnvCertError
+from envcert.core.rollup import rollup_to_text, run_dataset_rollup
 from envcert.reports.sarif import to_sarif
 from envcert.reports.text import to_text
 
@@ -65,7 +66,24 @@ def cmd_check(args) -> int:
         "image": getattr(args, "image", None), "image_digest": getattr(args, "image_digest", None),
         "runner_command": getattr(args, "runner_command", None),
         "external_tools": getattr(args, "external_tools", False),
+        "baseline": getattr(args, "baseline", None),
     })
+    if getattr(args, "dataset", False):
+        if args.format == "sarif":
+            print("error: SARIF is per-task; run rollups with --format json or text (per-task reports are embedded in the JSON rollup)", file=sys.stderr)
+            return EXIT_INVALID
+        rollup = run_dataset_rollup(task, settings, adapter_name=args.adapter)
+        if not rollup["task_folders_found"]:
+            print(f"error: no task folders (task.toml) found under {task}", file=sys.stderr)
+            return EXIT_INVALID
+        out = json.dumps(rollup, indent=2) if args.format == "json" else rollup_to_text(rollup)
+        if args.output:
+            Path(args.output).write_text(out if out.endswith("\n") else out + "\n", encoding="utf-8")
+            if not args.quiet:
+                print(rollup_to_text(rollup), file=sys.stderr)
+        else:
+            print(out, end="" if out.endswith("\n") else "\n")
+        return EXIT_OK if rollup["summary"]["overall_policy_passed"] else EXIT_POLICY
     report = run_checks(task, settings, adapter_name=args.adapter)
     fmt = args.format
     if fmt == "json":
@@ -182,6 +200,52 @@ def cmd_attest(args) -> int:
     return EXIT_OK
 
 
+def _finding_key(f: dict) -> tuple:
+    return (f.get("check_id"), f.get("path"), f.get("line"), f.get("status"))
+
+
+def cmd_diff(args) -> int:
+    def load(path_str: str):
+        path = Path(path_str)
+        if not path.is_file():
+            print(f"error: report not found: {path}", file=sys.stderr)
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"error: {path} is not valid JSON: {exc}", file=sys.stderr)
+            return None
+
+    old, new = load(args.old), load(args.new)
+    if old is None or new is None:
+        return EXIT_INVALID
+    old_keys = {_finding_key(f): f for f in old.get("findings", [])}
+    new_keys = {_finding_key(f): f for f in new.get("findings", [])}
+    added = [new_keys[k] for k in new_keys.keys() - old_keys.keys()]
+    resolved = [old_keys[k] for k in old_keys.keys() - new_keys.keys()]
+    new_bad = [f for f in added if f.get("status") in ("FAIL", "WARN") and f.get("severity") in ("CRITICAL", "HIGH")]
+    if args.format == "json":
+        print(json.dumps({
+            "old": {"task": (old.get("environment") or {}).get("task_name"), "bundle_digest": (old.get("environment") or {}).get("bundle_digest_sha256"),
+                    "policy_passed": (old.get("policy") or {}).get("passed"), "summary": old.get("summary")},
+            "new": {"task": (new.get("environment") or {}).get("task_name"), "bundle_digest": (new.get("environment") or {}).get("bundle_digest_sha256"),
+                    "policy_passed": (new.get("policy") or {}).get("passed"), "summary": new.get("summary")},
+            "new_findings": added, "resolved_findings": resolved,
+            "new_critical_or_high": len(new_bad),
+        }, indent=2))
+    else:
+        print(f"old: {(old.get('environment') or {}).get('task_name')} policy_passed={(old.get('policy') or {}).get('passed')} digest={(old.get('environment') or {}).get('bundle_digest_sha256', '')[:12]}")
+        print(f"new: {(new.get('environment') or {}).get('task_name')} policy_passed={(new.get('policy') or {}).get('passed')} digest={(new.get('environment') or {}).get('bundle_digest_sha256', '')[:12]}")
+        print(f"new findings: {len(added)} ({len(new_bad)} CRITICAL/HIGH), resolved findings: {len(resolved)}")
+        for f in added:
+            print(f"  + {f.get('check_id')} {f.get('severity')}/{f.get('status')} {f.get('path') or ''} {f.get('title', '')}")
+        for f in resolved:
+            print(f"  - {f.get('check_id')} {f.get('severity')}/{f.get('status')} {f.get('path') or ''} {f.get('title', '')}")
+    if args.strict and new_bad:
+        return EXIT_POLICY
+    return EXIT_OK
+
+
 def cmd_verify_attestation(args) -> int:
     path = Path(args.attestation)
     if not path.is_file():
@@ -268,6 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--image", default=None, help="OCI image reference whose digest should be bound into the report (resolved via docker inspect, or use name@sha256:...)")
     pc.add_argument("--image-digest", default=None, help="explicit sha256:<64 hex> image digest to bind into the report/attestation")
     pc.add_argument("--external-tools", action="store_true", help="also run installed companion tools (hadolint/trivy/semgrep) as EC070-EC072")
+    pc.add_argument("--baseline", default=None, help="previous JSON report; identical FAIL/WARN findings are marked baseline_suppressed and excluded from policy (shown in JSON + SARIF suppressions)")
+    pc.add_argument("--dataset", action="store_true", help="treat PATH as a dataset root: run every task folder (task.toml) beneath it and emit an aggregated rollup report")
     pc.add_argument("--fail-on", default=None, help="comma-separated severities that fail policy, e.g. critical,high")
     pc.add_argument("--enable", action="append", default=None, help="only run this check ID (repeatable)")
     pc.add_argument("--disable", action="append", default=None, help="skip this check ID (repeatable)")
@@ -289,6 +355,13 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--image", default=None, help="also attach the attestation to this OCI image (name@sha256:<digest>) via cosign attest; requires cosign")
     pa.add_argument("--key", default=None, help="cosign private key path")
     pa.set_defaults(fn=cmd_attest)
+
+    pdf = sub.add_parser("diff", help="compare two JSON reports: new vs resolved findings (trend diffing)")
+    pdf.add_argument("old")
+    pdf.add_argument("new")
+    pdf.add_argument("--format", choices=["text", "json"], default="text")
+    pdf.add_argument("--strict", action="store_true", help="exit 1 when new CRITICAL/HIGH findings appear")
+    pdf.set_defaults(fn=cmd_diff)
 
     pva = sub.add_parser("verify-attestation", help="verify an in-toto attestation: structural checks locally, plus cosign verify-attestation with --image")
     pva.add_argument("attestation")

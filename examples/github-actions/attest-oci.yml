@@ -1,0 +1,42 @@
+# Build a task image, check it with EnvCert, and attach a signed in-toto
+# Test Result attestation to the image in GHCR using keyless Cosign
+# (GitHub OIDC). Copy into .github/workflows/attest-oci.yml and adapt the
+# image name / task path.
+name: attest-oci
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  packages: write
+  id-token: write # keyless cosign via GitHub OIDC
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./my-task/environment
+          push: true
+          tags: ghcr.io/${{ github.repository }}/my-task:latest
+      - name: Install EnvCert and Cosign
+        run: |
+          pip install envcert
+          # sigstore/cosign-installer action is recommended in real repos:
+          # uses: sigstore/cosign-installer@v3
+          curl -sL https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64 -o /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+      - name: Check, attest and verify
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}/my-task@${{ steps.build.outputs.digest }}
+        run: |
+          envcert check ./my-task --image "$IMAGE" --format json --output report.json
+          envcert attest report.json --output attestation.json --image "$IMAGE"
+          envcert verify-attestation attestation.json --image "$IMAGE" --policy examples/cosign/policy.cue

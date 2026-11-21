@@ -4,6 +4,20 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
+### Added
+- EC065 NeMo Gym verifier probing with gold/mutated/swapped inputs
+  (`--execution local-python`); EC055 Inspect scorer-strength checks.
+- Dataset rollups: `envcert check --dataset` over all task folders in a
+  dataset tree, with per-task reports embedded in the JSON rollup.
+- Coverage-aware mutation: mutants on verifier-unexecuted lines are
+  inconclusive and excluded from the EC063 rejection rate.
+- Report baselines (`--baseline`, SARIF suppressions) and `envcert diff`
+  trend comparison with `--strict`.
+- Inspect dynamic-runner example and keyless GHCR Cosign attestation
+  workflow example; local-registry Cosign round-trip verified.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

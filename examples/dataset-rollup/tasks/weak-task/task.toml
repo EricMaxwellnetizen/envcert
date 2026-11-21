@@ -1,0 +1,5 @@
+schema_version = "1.4"
+[task]
+name = "demo/weak-task"
+[environment]
+network_mode = "public"

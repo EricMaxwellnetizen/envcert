@@ -177,6 +177,13 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Remediation: Compute the reward inside the verifier from raw artifacts; validate any agent-produced file strictly.
 - Limitations: Heuristic; some tasks legitimately read agent output files — they must validate content, which needs human review.
 
+## EC055 - Inspect scorer is not trivially satisfiable
+
+- Category: verifier  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Substring (includes) and loose match scorers accept outputs that merely mention the target; exact/structured or well-tested custom scorers are stronger.
+- Remediation: Prefer exact()/pattern() with anchored extraction or a custom scorer with negative tests; if includes/match is intentional, document why substring acceptance is semantically correct here.
+- Limitations: Scorer choice can be legitimate (e.g. short factual answers); this flags weakness patterns for review, not proof of exploitability.
+
 ## EC060 - Reference (gold) solution passes the verifier
 
 - Category: dynamic  |  Default severity on failure: HIGH  |  Dynamic: True
@@ -211,6 +218,13 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Description: Mutating literal outputs in solution/solve.sh should make the verifier reject the run; surviving mutants signal a weak verifier.
 - Remediation: Strengthen verifier assertions on the mutated outputs.
 - Limitations: Docker execution only; only literal-bearing shell solutions can be mutated. Mutant validity is heuristic.
+
+## EC065 - NeMo verifier probing with mutated inputs (gold/wrong/swapped answers)
+
+- Category: dynamic  |  Default severity on failure: HIGH  |  Dynamic: True
+- Description: Feeding a NeMo Gym verify() its rows' expected answers should score 1; mutated and row-swapped answers should score < 1.
+- Remediation: Fix verify() so correct answers pass and incorrect/swapped answers fail for every probed row.
+- Limitations: local-python execution only (trusted code, no sandbox); probes up to 10 rows and the verify(response=..., task_data=...) convention.
 
 ## EC070 - Hadolint Dockerfile lint (external companion)
 

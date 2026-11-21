@@ -130,6 +130,11 @@ EC054 = CheckInfo("EC054", "Verifier does not trust agent-controlled result file
                   "Compute the reward inside the verifier from raw artifacts; validate any agent-produced file strictly.",
                   "Heuristic; some tasks legitimately read agent output files — they must validate content, which needs human review.")
 
+EC055 = CheckInfo("EC055", "Inspect scorer is not trivially satisfiable", "verifier", Severity.MEDIUM,
+                  "Substring (includes) and loose match scorers accept outputs that merely mention the target; exact/structured or well-tested custom scorers are stronger.",
+                  "Prefer exact()/pattern() with anchored extraction or a custom scorer with negative tests; if includes/match is intentional, document why substring acceptance is semantically correct here.",
+                  "Scorer choice can be legitimate (e.g. short factual answers); this flags weakness patterns for review, not proof of exploitability.")
+
 ALL_STATIC = [EC001, EC002, EC003, EC010, EC011, EC012, EC013, EC014, EC020, EC021, EC022, EC023, EC024,
               EC030, EC031, EC032, EC033, EC040, EC041, EC050, EC051, EC052, EC053, EC054]
 
@@ -879,11 +884,33 @@ def check_self_reported_reward(c: CheckContext) -> list:
     return [passed(EC054, "Verifier does not obviously read its reward from an agent-produced file.")]
 
 
+@check(EC055)
+def check_inspect_scorer_strength(c: CheckContext) -> list:
+    ctx = c.task
+    if ctx.adapter != "inspect":
+        return [not_applicable(EC055, "Scorer-strength patterns are Inspect-specific; other frameworks are covered by EC052/EC053.")]
+    scorers = (ctx.config or {}).get("scorers") or []
+    if not scorers:
+        return [not_applicable(EC055, "No scorer= detected to assess (see EC051).")]
+    weak = [s for s in scorers if s.split("(")[0].strip().endswith("includes")]
+    graded = [s for s in scorers if "model_graded" in s]
+    findings = []
+    if graded:
+        findings.append(finding(EC055, Status.WARN, f"Model-graded scorer(s) {graded} are model-dependent and non-deterministic; pin grader model/version and record them with results for reproducibility.",
+                                severity=Severity.MEDIUM, evidence={"scorers": scorers}, confidence=Confidence.MEDIUM))
+    if weak:
+        findings.append(finding(EC055, Status.WARN, f"Substring scorer(s) {weak} accept any output containing the target, including outputs that mention it without answering; confirm this is semantically intended.",
+                                severity=Severity.MEDIUM, evidence={"scorers": scorers}, confidence=Confidence.MEDIUM))
+    if findings:
+        return findings
+    return [passed(EC055, f"Scorer(s) {scorers} are not substring/model-graded weakness patterns (exact/pattern/custom strength still depends on their logic — see EC053).", evidence={"scorers": scorers})]
+
+
 def register_all() -> list[CheckInfo]:
     return [REGISTRY[i][0] for i in
             ["EC001", "EC002", "EC003", "EC004", "EC010", "EC011", "EC012", "EC013", "EC014", "EC020", "EC021", "EC022",
              "EC023", "EC024", "EC030", "EC031", "EC032", "EC033", "EC040", "EC041", "EC050", "EC051", "EC052",
-             "EC053", "EC054"]]
+             "EC053", "EC054", "EC055"]]
 
 
 # importing this module registers checks; ensure registry import side-effect is explicit

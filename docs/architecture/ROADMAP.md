@@ -32,17 +32,31 @@
 - **Companion-tool orchestration**: `--external-tools` runs Hadolint /
   Trivy / Semgrep (task-config only) as EC070–EC072 when installed.
 
-## Next (0.3 candidates, not promised dates)
-1. NeMo Gym Resources-Server (`verify()` over HTTP) live probing and
-   per-task-folder dataset rollups in one report.
-2. Inspect dynamic runs (`inspect eval`) behind the external-runner
-   protocol examples; scorer-specific strength checks (exact/includes
-   weakness patterns).
-3. Equivalent-mutant reduction via coverage data; mutation of verifier
-   *inputs* for data-driven verifiers.
-4. Registry push/pull of attestations in CI examples (cosign attest to a
-   real registry with keyless signing in GitHub Actions).
-5. SARIF suppressions/baseline files and trend diffing between reports.
+## Implemented in 0.3.0
+- NeMo `verify()` live probing with gold/mutated/swapped inputs (EC065)
+  and per-task-folder dataset rollups (`check --dataset`).
+- Inspect dynamic runs behind the external-runner protocol
+  (`examples/external-runners/inspect_runner.py`); scorer-strength
+  checks EC055 (includes/model-graded patterns).
+- Coverage-based equivalent-mutant reduction: mutants on lines the gold
+  run never executes are inconclusive (EC063); verifier-input mutation
+  is EC065.
+- Registry attestation flow: Cosign attest/verify against an OCI
+  registry (verified end-to-end against a local registry), plus a
+  keyless GHCR GitHub Actions example.
+- SARIF baseline suppressions (`--baseline`) and report trend diffing
+  (`envcert diff [--strict]`).
+
+## Next (0.4 candidates, not promised dates)
+1. NeMo Resources-Server HTTP probing against a *running* server
+   (`/verify` endpoint) as an external-runner example with a live server
+   fixture.
+2. Coverage-guided mutant prioritisation and larger operator sets;
+   mutation for Inspect custom scorers.
+3. Dataset rollups with SARIF merging and per-dataset attestations whose
+   subjects are every task-folder digest.
+4. Scheduled-revalidation examples (cron workflows that re-run checks and
+   open issues on `envcert diff --strict` regressions).
 
 ## Explicit non-goals
 Hosted dashboard/SaaS, LLM exploit generation, a numerical quality score,

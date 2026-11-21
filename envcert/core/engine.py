@@ -114,8 +114,28 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
                                     description=f"Check raised an error and did not complete: {exc}",
                                     category=info.category, severity=Severity.INFO, status=Status.ERROR,
                                     evidence={"error": str(exc)}))
+    suppressed_count = 0
+    if settings.baseline:
+        import json as _json
+
+        baseline_path = Path(settings.baseline)
+        if not baseline_path.is_file():
+            from envcert.core.errors import ConfigError
+
+            raise ConfigError(f"baseline report not found: {baseline_path}")
+        try:
+            baseline_report = _json.loads(baseline_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            from envcert.core.errors import ConfigError
+
+            raise ConfigError(f"baseline report is not valid JSON: {exc}") from exc
+        baseline_keys = {(f.get("check_id"), f.get("path"), f.get("line")) for f in baseline_report.get("findings", [])}
+        for f in findings:
+            if (f.check_id, f.path, f.line) in baseline_keys and f.status in (Status.FAIL, Status.WARN):
+                f.baseline_suppressed = True
+                suppressed_count += 1
     fail_on = settings.fail_on
-    policy_passed = not any(f.status in (Status.FAIL, Status.WARN) and f.severity in fail_on for f in findings) \
+    policy_passed = not any(f.status in (Status.FAIL, Status.WARN) and f.severity in fail_on and not f.baseline_suppressed for f in findings) \
         and not any(f.status == Status.ERROR for f in findings)
     counts: dict[str, int] = {}
     for f in findings:
@@ -170,7 +190,8 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
         "checks_executed": executed,
         "checks_not_executed": sorted(set(REGISTRY) - set(executed)),
         "findings": [f.to_dict() for f in findings],
-        "summary": {"total_findings": len(findings), "by_status": counts, "by_severity_failing": severity_counts},
+        "summary": {"total_findings": len(findings), "by_status": counts, "by_severity_failing": severity_counts,
+                    "baseline_suppressed": suppressed_count, "baseline": settings.baseline},
         "errors": errors,
         "policy": {"passed": policy_passed,
                    "fail_on": settings.fail_on_names(),

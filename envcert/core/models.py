@@ -47,6 +47,7 @@ class Finding:
     remediation: str = ""
     confidence: Confidence = Confidence.MEDIUM
     limitations: str = ""
+    baseline_suppressed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -64,6 +65,7 @@ class Finding:
             path=d.get("path"), line=d.get("line"), evidence=d.get("evidence") or {},
             remediation=d.get("remediation", ""),
             confidence=Confidence(d.get("confidence", "medium")), limitations=d.get("limitations", ""),
+            baseline_suppressed=bool(d.get("baseline_suppressed", False)),
         )
 
 

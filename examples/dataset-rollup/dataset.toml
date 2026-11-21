@@ -1,0 +1,6 @@
+name = "local/demo-dataset"
+version = "0.1.0"
+
+[gym]
+license = "Apache 2.0"
+type = "validation"

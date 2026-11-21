@@ -43,7 +43,7 @@ def test_main_list_explain_schema(capsys):
     assert main(["schema"]) == 0
     assert "EnvCert Report" in capsys.readouterr().out
     assert main(["version"]) == 0
-    assert "0.2.0" in capsys.readouterr().out
+    assert "0.3.0" in capsys.readouterr().out
 
 
 def test_main_no_args_is_invalid(capsys):

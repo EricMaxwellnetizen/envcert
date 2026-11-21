@@ -30,13 +30,17 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
             if f.get("line"):
                 region = {"startLine": f["line"]}
             loc = {"physicalLocation": {"artifactLocation": artifact_loc, **({"region": region} if region else {})}}
-        results.append({
+        result: dict[str, Any] = {
             "ruleId": f["check_id"],
             "level": LEVEL.get(f["severity"], "warning"),
             "message": {"text": f["description"]},
             "locations": [loc] if loc else [],
             "properties": {"status": f["status"], "confidence": f.get("confidence"), "evidence": f.get("evidence")},
-        })
+        }
+        if f.get("baseline_suppressed"):
+            result["suppressions"] = [{"kind": "external", "justification": "identical finding present in the EnvCert baseline report"}]
+            result["properties"]["baseline_suppressed"] = True
+        results.append(result)
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",

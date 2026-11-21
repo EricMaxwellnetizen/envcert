@@ -51,6 +51,7 @@ class Settings:
     image_digest: str | None = None   # explicit sha256:... digest to bind into the report
     runner_command: str = ""          # external runner executable (execution=external)
     external_tools: bool = False      # run hadolint/trivy/semgrep companions when installed
+    baseline: str | None = None       # previous report: identical findings are suppressed from policy
 
     def fail_on_names(self) -> list[str]:
         return sorted((s.value for s in self.fail_on), key=lambda v: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].index(v))
@@ -148,6 +149,8 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
             s.runner_command = str(overrides["runner_command"])
         if overrides.get("external_tools"):
             s.external_tools = True
+        if overrides.get("baseline"):
+            s.baseline = str(overrides["baseline"])
     if s.execution not in ("none", "docker", "local-python", "external"):
         raise ConfigError(f"unknown execution mode {s.execution!r}; expected none, docker, local-python or external")
     if s.repetitions < 1 or s.repetitions > 20:

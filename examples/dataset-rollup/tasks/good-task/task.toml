@@ -1,0 +1,8 @@
+schema_version = "1.4"
+[task]
+name = "demo/good-task"
+[verifier]
+environment_mode = "separate"
+timeout_sec = 60.0
+[environment]
+network_mode = "no-network"

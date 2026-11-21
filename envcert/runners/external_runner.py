@@ -13,7 +13,8 @@ operator can point EnvCert at *their* disposable-VM/remote-sandbox script:
 Set it with `--execution external --runner-command /path/to/provider` or
 `[execution] runner_command` in envcert.toml.  The provider owns isolation;
 EnvCert records that honestly in the report.  The command is split with
-shlex and executed without a shell.
+platform-appropriate quoting and executed without a shell, so Windows paths
+with backslashes and spaces work when quoted.
 """
 from __future__ import annotations
 
@@ -27,6 +28,26 @@ from pathlib import Path
 from envcert.runners.base import Runner, RunnerInfo, RunResult
 
 MAX_OUTPUT = 20000
+
+
+def split_runner_command(command: str, windows: bool | None = None) -> list[str]:
+    """Split a runner command without invoking a shell.
+
+    POSIX quoting treats backslash as an escape, which mangles Windows paths
+    such as ``.venv\\Scripts\\python.exe``.  On Windows use non-POSIX splitting
+    and strip the surrounding quotes that shlex leaves on quoted arguments.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return shlex.split(command, posix=True)
+    parts = shlex.split(command, posix=False)
+    cleaned = []
+    for part in parts:
+        if len(part) >= 2 and part[0] == part[-1] and part[0] in ("'", '"'):
+            part = part[1:-1]
+        cleaned.append(part)
+    return cleaned
 
 
 class ExternalRunner(Runner):
@@ -48,8 +69,8 @@ class ExternalRunner(Runner):
         if not info.available:
             return RunResult(ok=False, error=info.reason)
         try:
-            argv = shlex.split(self.command) + ["--task", str(Path(task_root).resolve()),
-                                                "--variant", variant, "--timeout", str(timeout)]
+            argv = split_runner_command(self.command) + ["--task", str(Path(task_root).resolve()),
+                                                         "--variant", variant, "--timeout", str(timeout)]
         except ValueError as exc:
             return RunResult(ok=False, error=f"unparseable runner command: {exc}")
         start = time.time()

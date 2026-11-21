@@ -13,6 +13,7 @@ class RunResult:
     error: str = ""
     duration_sec: float = 0.0
     image_digest: str | None = None
+    image_digest_note: str = ""
 
 
 @dataclass

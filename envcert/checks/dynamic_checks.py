@@ -51,6 +51,8 @@ def _run_variant(c: CheckContext, variant: str):
         result = DockerRunner().run_harbor_task(ctx.root, variant=variant)
         if result.image_digest:
             c.shared["image_digest"] = result.image_digest
+        if result.image_digest_note:
+            c.shared["image_digest_note"] = result.image_digest_note
         return result, None
     if c.execution == "external":
         from envcert.runners.external_runner import ExternalRunner
@@ -58,6 +60,8 @@ def _run_variant(c: CheckContext, variant: str):
         result = ExternalRunner(c.runner_command).run_harbor_task(ctx.root, variant=variant)
         if result.image_digest:
             c.shared["image_digest"] = result.image_digest
+        if result.image_digest_note:
+            c.shared["image_digest_note"] = result.image_digest_note
         return result, None
     if c.execution == "local-python":
         if not _is_python_task(ctx):

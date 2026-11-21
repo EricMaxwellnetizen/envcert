@@ -43,7 +43,9 @@ def test_main_list_explain_schema(capsys):
     assert main(["schema"]) == 0
     assert "EnvCert Report" in capsys.readouterr().out
     assert main(["version"]) == 0
-    assert "0.3.0" in capsys.readouterr().out
+    from envcert import __version__
+
+    assert __version__ in capsys.readouterr().out
 
 
 def test_main_no_args_is_invalid(capsys):
@@ -57,19 +59,20 @@ def test_main_init(tmp_path, capsys):
     capsys.readouterr()
 
 
-def test_main_attest_sign_without_cosign_reports_gracefully(tmp_path, capsys, monkeypatch):
-    import envcert.cli.main as cli
+def test_main_attest_sign_without_cosign_fails_loudly(tmp_path, capsys, monkeypatch):
+    import envcert.attestations.intoto as intoto
 
-    monkeypatch.setattr(cli, "cosign_available", lambda: None)
+    monkeypatch.setattr(intoto, "cosign_available", lambda: None)
     out = tmp_path / "r.json"
     assert main(["check", str(ROOT / "examples" / "safe-environment"), "--format", "json",
                  "--output", str(out), "--quiet"]) == 0
     att = tmp_path / "a.json"
-    # sign requested but cosign missing: statement still written, no crash, message explains
+    # signing was explicitly requested: the statement is still written, but the
+    # command must not report success when no signature exists.
     rc = main(["attest", str(out), "--output", str(att), "--sign"])
     assert att.is_file()
-    assert rc in (0, 3)
-    capsys.readouterr()
+    assert rc == 3
+    assert "did not complete" in capsys.readouterr().err
 
 
 def test_docker_runner_unavailable_is_graceful(monkeypatch):

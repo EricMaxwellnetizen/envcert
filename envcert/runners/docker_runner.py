@@ -10,9 +10,11 @@ unavailable and dynamic checks return NOT_RUN/ERROR — never a fake PASS.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
+import uuid
 
 from envcert.runners.base import Runner, RunnerInfo, RunResult
 
@@ -59,7 +61,9 @@ class DockerRunner(Runner):
         if not dockerfile.is_file():
             return RunResult(ok=False, error="no environment/Dockerfile to build")
         exe = shutil.which("docker") or "docker"
-        tag = f"envcert-check-{int(time.time())}"
+        # Unique per process and invocation: two concurrent checks in the same
+        # second must not build/run/delete the same tag.
+        tag = f"envcert-check-{os.getpid()}-{uuid.uuid4().hex[:12]}"
         start = time.time()
         try:
             build = _run([exe, "build", "-t", tag, "-f", str(dockerfile), str(root / "environment")],
@@ -97,7 +101,11 @@ class DockerRunner(Runner):
                     continue
             return RunResult(ok=run.returncode == 0, exit_code=run.returncode, stdout=out,
                              stderr=(run.stderr or "")[-MAX_OUTPUT:], reward=reward,
-                             duration_sec=round(time.time() - start, 3), image_digest=image_digest)
+                             duration_sec=round(time.time() - start, 3), image_digest=image_digest,
+                             image_digest_note=(
+                                 "docker runner image is locally built; image_digest is the local image ID, "
+                                 "not a registry manifest digest"
+                             ) if image_digest else "")
         except subprocess.TimeoutExpired:
             return RunResult(ok=False, error=f"docker execution timed out after {timeout}s",
                              duration_sec=float(timeout))

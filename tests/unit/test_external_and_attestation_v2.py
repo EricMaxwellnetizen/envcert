@@ -1,7 +1,7 @@
 import json
 
 import envcert.checks.external_checks as ext
-from envcert.attestations.intoto import build_statement, cosign_attest_image
+from envcert.attestations.intoto import build_statement, cosign_attest_image, dsse_envelope_unsigned
 from envcert.checks.base import CheckContext
 from envcert.cli.main import main
 from envcert.core.config import load_settings
@@ -54,13 +54,19 @@ def test_cosign_attest_refuses_mutable_ref(tmp_path):
     assert not ok and "mutable" in msg
 
 
-def test_verify_attestation_cli(tmp_path, basic_task, capsys):
+def test_verify_attestation_unsigned_fails_without_opt_in(tmp_path, basic_task, capsys):
     report = run_checks(basic_task, load_settings(None, None, None))
     att = tmp_path / "att.json"
     att.write_text(json.dumps(build_statement(report, b"{}")), encoding="utf-8")
-    assert main(["verify-attestation", str(att)]) == 0
+    # A plain statement carries no signature: structural validity must not be
+    # reported as successful verification.
+    assert main(["verify-attestation", str(att)]) == 1
     out = capsys.readouterr().out
-    assert "structure OK" in out and "no cryptographic verification" in out
+    assert "no signatures" in out and "--allow-unsigned" in out
+
+    assert main(["verify-attestation", str(att), "--allow-unsigned"]) == 0
+    out = capsys.readouterr().out
+    assert "structure OK" in out and "NOT cryptographic evidence" in out
 
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"_type": "x", "subject": [], "predicate": {}}), encoding="utf-8")
@@ -68,14 +74,46 @@ def test_verify_attestation_cli(tmp_path, basic_task, capsys):
     capsys.readouterr()
 
 
-def test_attest_with_image_requires_cosign(monkeypatch, tmp_path, basic_task, capsys):
+def test_verify_attestation_unsigned_dsse_fails_without_opt_in(tmp_path, basic_task, capsys):
+    report = run_checks(basic_task, load_settings(None, None, None))
+    env = dsse_envelope_unsigned(build_statement(report, b"{}"))
+    att = tmp_path / "att.json"
+    att.write_text(json.dumps(env), encoding="utf-8")
+    assert main(["verify-attestation", str(att)]) == 1
+    assert "no signatures" in capsys.readouterr().out
+    assert main(["verify-attestation", str(att), "--allow-unsigned"]) == 0
+    assert "structure OK" in capsys.readouterr().out
+
+
+def test_verify_attestation_checks_detached_signature(monkeypatch, tmp_path, basic_task, capsys):
     import envcert.cli.main as cli
 
+    report = run_checks(basic_task, load_settings(None, None, None))
+    att = tmp_path / "att.json"
+    att.write_text(json.dumps(build_statement(report, b"{}")), encoding="utf-8")
+    sig = tmp_path / "att.json.sig"
+    sig.write_text("fake-signature", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "cosign_verify_blob", lambda *_a, **_k: (True, "cosign verified"))
+    assert main(["verify-attestation", str(att)]) == 0
+    out = capsys.readouterr().out
+    assert "signature_verified=True" in out
+
+    monkeypatch.setattr(cli, "cosign_verify_blob", lambda *_a, **_k: (False, "bad signature"))
+    assert main(["verify-attestation", str(att), "--allow-unsigned"]) == 1
+    capsys.readouterr()
+
+
+def test_attest_with_image_requires_cosign(monkeypatch, tmp_path, basic_task, capsys):
+    import envcert.attestations.intoto as intoto
+
+    monkeypatch.setattr(intoto, "cosign_available", lambda: None)
     report_path = tmp_path / "r.json"
     report_path.write_text(json.dumps(run_checks(basic_task, load_settings(None, None, None))), encoding="utf-8")
-    # cosign absent on most dev machines: statement still written, clear message, no crash
-    if cli.cosign_available() is None:
-        out = tmp_path / "a.json"
-        main(["attest", str(report_path), "--output", str(out), "--image", "img@sha256:" + "a" * 64])
-        assert out.is_file()
-        assert "cosign not found" in capsys.readouterr().out
+    out = tmp_path / "a.json"
+    # The statement is still written, but a requested OCI attestation that did
+    # not happen is an execution error, not a success.
+    assert main(["attest", str(report_path), "--output", str(out),
+                 "--image", "img@sha256:" + "a" * 64]) == 3
+    assert out.is_file()
+    assert "cosign not found" in capsys.readouterr().out

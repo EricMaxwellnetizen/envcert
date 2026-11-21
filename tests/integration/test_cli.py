@@ -13,8 +13,10 @@ def run_cli(*args, cwd=ROOT):
 
 
 def test_version_and_list_checks():
+    from envcert import __version__
+
     r = run_cli("version")
-    assert r.returncode == 0 and "0.3.0" in r.stdout
+    assert r.returncode == 0 and __version__ in r.stdout
     r = run_cli("list-checks")
     assert r.returncode == 0 and "EC011" in r.stdout and "EC063" in r.stdout
     r = run_cli("explain", "EC011")

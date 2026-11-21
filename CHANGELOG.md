@@ -4,6 +4,41 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-22
+
+### Fixed
+- `verify` and `attest` now recompute `policy.passed` and all summary counters
+  from the findings instead of trusting self-asserted fields. Forged or
+  inconsistent reports are rejected (exit 2); `verify` exits 2 for
+  schema/consistency failures and keeps exit 1 for a bundle-digest mismatch.
+- `verify-attestation` fails on unsigned statements and DSSE envelopes unless
+  `--allow-unsigned` is passed. Detached `.sig` files produced by `--sign` are
+  verified with `cosign verify-blob`; a present but invalid signature always
+  fails, even with `--allow-unsigned`.
+- `attest --sign` and `attest --image` now exit 3 when signing or OCI
+  attestation was requested but did not happen (cosign missing, tlog/network
+  failure, mutable ref), instead of exiting 0 with an unsigned statement.
+- `--image`/`--image-digest` resolution failures and malformed digests are
+  configuration errors (exit 2). Docker `RepoDigests` (registry manifest
+  digest) is preferred over the local image ID; the ID fallback is labelled
+  explicitly in report warnings.
+- Windows `--runner-command` splitting preserves backslash paths without
+  requiring quotes; quoted paths with spaces still work.
+- Unknown `--enable`/`--disable` check IDs, empty `[checks] enabled` lists and
+  configurations selecting no checks are rejected instead of producing a
+  vacuous PASS report.
+- `[checks.dynamic] enabled = true` no longer silently implies unsandboxed
+  `local-python` execution; an explicit execution mode is required.
+- Docker check images use a unique per-run tag, avoiding collisions between
+  concurrent runs.
+- Baseline suppression now fingerprints finding content (message, severity,
+  status, evidence) rather than only `(check_id, path, line)`, so a new issue
+  at the same location is not hidden by an old baseline entry.
+- Bundle digests report file-listing truncation and unreadable files instead
+  of silently hashing incomplete/empty content.
+- `attest --image` refuses an image digest that differs from the report's
+  recorded `image_digest`, and temporary predicate files are cleaned up.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added

@@ -117,6 +117,23 @@ def cosign_verify_attestation(image: str, key_path: str | None = None, policy: s
     return True, f"cosign verify-attestation passed for {image}"
 
 
+def cosign_verify_blob(blob_path: Path, signature_path: Path, key_path: str | None = None) -> tuple[bool, str]:
+    """Verify a detached cosign signature (the `.sig` written by --sign)."""
+    exe = cosign_available()
+    if not exe:
+        return False, "cosign not found on PATH; cannot verify the detached signature"
+    cmd = [exe, "verify-blob", "--signature", str(signature_path)]
+    if key_path:
+        cmd += ["--key", key_path]
+    else:
+        cmd += ["--certificate-identity-regexp", ".*", "--certificate-oidc-issuer-regexp", ".*"]
+    cmd.append(str(blob_path))
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        return False, f"cosign verify-blob failed: {(proc.stderr or proc.stdout)[:500]}"
+    return True, f"cosign verified the detached signature {signature_path.name} for {blob_path.name}"
+
+
 def verify_statement_local(statement: dict[str, Any]) -> list[str]:
     """Structural verification only (no cryptography): type, subjects, result."""
     problems = []
@@ -136,8 +153,8 @@ def verify_statement_local(statement: dict[str, Any]) -> list[str]:
 def sign_with_cosign(envelope_path: Path, key_path: str | None = None) -> tuple[bool, str]:
     exe = cosign_available()
     if not exe:
-        return False, "cosign not found on PATH; attestation left unsigned (this is not an error — install cosign to sign)"
-    cmd = [exe, "sign-blob", "--output-signature", str(envelope_path) + ".sig", str(envelope_path)]
+        return False, "cosign not found on PATH; signing was requested but could not be performed"
+    cmd = [exe, "sign-blob", "--yes", "--output-signature", str(envelope_path) + ".sig", str(envelope_path)]
     if key_path:
         cmd[2:2] = ["--key", key_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

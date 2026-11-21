@@ -64,7 +64,13 @@ def load_dockerfile(ctx: TaskContext, dockerfile_rel: str, context_rel: str) -> 
 
 
 def scan_files(ctx: TaskContext) -> None:
-    for rel, _path, is_link in iter_task_files(ctx.root):
+    stats: dict = {}
+    for rel, _path, is_link in iter_task_files(ctx.root, stats=stats):
         ctx.files.append(rel)
         if is_link:
             ctx.symlinks.append(rel)
+    if stats.get("truncated"):
+        ctx.warnings.append(
+            f"task file listing was truncated at {stats.get('max_files')} files; checks and the bundle digest "
+            "did not see the remaining files"
+        )

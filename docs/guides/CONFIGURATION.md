@@ -11,12 +11,23 @@ profile = "harbor"        # harbor | strict | minimal | ci
 disabled = ["EC031"]             # skip specific stable check IDs
 
 [checks.dynamic]
-enabled = false                  # true = local-python execution (trusted tasks only)
+enabled = false                  # true requires an explicit [execution] mode (never implied)
 repetitions = 3
+
+[execution]
+# mode = "local-python"          # trusted tasks only, NO sandbox
+# mode = "docker"                # restricted container
+# mode = "external"              # your disposable-VM runner
+# runner_command = "C:\\tools\\runner.exe"
 
 [policy]
 fail_on = ["critical", "high"]   # severities that make the exit code 1
 ```
+
+`enabled = true` under `[checks.dynamic]` does not choose an execution mode.
+EnvCert refuses to run task code unless `[execution] mode` or `--execution`
+explicitly selects one, so a config cannot silently fall back to unsandboxed
+local execution.
 
 Profiles:
 

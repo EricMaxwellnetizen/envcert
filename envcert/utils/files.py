@@ -7,13 +7,16 @@ MAX_TEXT_BYTES = 2_000_000
 SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", "node_modules"}
 
 
-def iter_task_files(root: Path, max_files: int = 5000):
-    """Yield (relative_posix_path, absolute_path, is_symlink) without following dir symlinks."""
+def iter_task_files(root: Path, max_files: int = 5000, stats: dict | None = None):
+    """Yield (relative_posix_path, absolute_path, is_symlink) without following dir symlinks.
+
+    When the file cap is reached, ``stats["truncated"]`` is set so callers can
+    report that the digest/listing is incomplete instead of silently treating
+    the first N files as the whole task.
+    """
     root = root.resolve()
     count = 0
     for p in sorted(root.rglob("*")):
-        if count >= max_files:
-            break
         rel_parts = p.relative_to(root).parts
         if any(part in SKIP_DIRS for part in rel_parts):
             continue
@@ -22,6 +25,11 @@ def iter_task_files(root: Path, max_files: int = 5000):
             continue
         if p.is_dir():
             continue
+        if count >= max_files:
+            if stats is not None:
+                stats["truncated"] = True
+                stats["max_files"] = max_files
+            break
         count += 1
         yield p.relative_to(root).as_posix(), p, is_link
 

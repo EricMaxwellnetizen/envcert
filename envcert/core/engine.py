@@ -17,7 +17,9 @@ from envcert.adapters.base import TaskContext
 from envcert.checks.base import REGISTRY, CheckContext
 from envcert.core.config import Settings
 from envcert.core.digests import bundle_digest, sha256_file
+from envcert.core.errors import ConfigError
 from envcert.core.models import Finding, Severity, Status
+from envcert.core.report import finding_fingerprint
 from envcert.runners.docker_runner import DockerRunner
 from envcert.runners.local_runner import LocalPythonRunner
 
@@ -50,31 +52,90 @@ def load_task(path: Path, adapter_name: str = "auto") -> TaskContext:
 
 
 def resolve_image_digest(settings: Settings) -> tuple[str | None, str]:
-    """Return (digest, note). Explicit digest wins; then a docker-inspect of
-    --image; a bare tag is never treated as a digest."""
+    """Return (digest, note), or raise ConfigError when an explicit image
+    reference cannot be bound honestly.
+
+    Explicit `--image-digest` wins.  For `--image`, a name@sha256 reference is
+    used directly; otherwise Docker's RepoDigests are preferred (the registry
+    manifest digest).  A locally built image with no RepoDigests falls back to
+    the local image ID *with an explicit warning*, because that is not a
+    registry manifest digest.  A bare tag is never silently treated as a
+    digest.
+    """
+    import json
     import re
     import shutil
     import subprocess
 
+    digest_re = re.compile(r"sha256:[0-9a-f]{64}")
     if settings.image_digest:
-        d = settings.image_digest.strip()
-        return (d if re.fullmatch(r"sha256:[0-9a-f]{64}", d) else None,
-                "explicit --image-digest" if re.fullmatch(r"sha256:[0-9a-f]{64}", d) else "invalid --image-digest ignored (expected sha256:<64 hex>)")
+        d = settings.image_digest.strip().lower()
+        if not digest_re.fullmatch(d):
+            raise ConfigError(
+                f"invalid --image-digest {settings.image_digest!r}: expected sha256:<64 lowercase hex>; "
+                "refusing to bind a malformed digest"
+            )
+        return d, "explicit --image-digest"
     if settings.image:
-        ref = settings.image
+        ref = settings.image.strip()
         if "@sha256:" in ref:
-            return "sha256:" + ref.rsplit("@sha256:", 1)[1], "digest taken from --image reference"
+            d = "sha256:" + ref.rsplit("@sha256:", 1)[1].lower()
+            if not digest_re.fullmatch(d):
+                raise ConfigError(f"invalid digest in --image reference {ref!r}: expected name@sha256:<64 hex>")
+            return d, "digest taken from --image reference"
         exe = shutil.which("docker")
         if not exe:
-            return None, f"could not resolve digest for {ref!r}: docker not installed (pass --image-digest explicitly)"
+            raise ConfigError(
+                f"cannot resolve a digest for --image {ref!r}: docker is not installed. "
+                "Pass --image-digest sha256:<64 hex> or use name@sha256:<digest>."
+            )
+        try:
+            proc = subprocess.run([exe, "image", "inspect", "--format", "{{json .RepoDigests}}", ref],
+                                  capture_output=True, text=True, timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            raise ConfigError(f"cannot resolve a digest for --image {ref!r}: {exc}") from exc
+        if proc.returncode != 0:
+            raise ConfigError(
+                f"cannot resolve a digest for --image {ref!r}: image is not present locally or inspect failed. "
+                "Pull the image, pass --image-digest explicitly, or use name@sha256:<digest>."
+            )
+        try:
+            repo_digests = json.loads(proc.stdout.strip() or "[]")
+        except ValueError:
+            repo_digests = []
+        last = ref.rsplit("/", 1)[-1]
+        repo_name = ref.rsplit(":", 1)[0] if ":" in last else ref
+
+        def _normalize_repo(name: str) -> str:
+            name = name.lower()
+            for prefix in ("docker.io/", "index.docker.io/"):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+            return name[len("library/"):] if name.startswith("library/") else name
+
+        candidates = [
+            entry for entry in (repo_digests if isinstance(repo_digests, list) else [])
+            if isinstance(entry, str) and "@sha256:" in entry
+        ]
+        chosen = next(
+            (e for e in candidates if _normalize_repo(e.rsplit("@", 1)[0]) == _normalize_repo(repo_name)),
+            None,
+        )
+        if chosen is not None:
+            d = "sha256:" + chosen.rsplit("@sha256:", 1)[1].lower()
+            if digest_re.fullmatch(d):
+                return d, f"resolved --image {ref!r} via docker image inspect (RepoDigests manifest digest)"
         try:
             proc = subprocess.run([exe, "image", "inspect", "--format", "{{.Id}}", ref],
                                   capture_output=True, text=True, timeout=30)
-            if proc.returncode == 0 and proc.stdout.strip().startswith("sha256:"):
-                return proc.stdout.strip(), f"resolved --image {ref!r} via docker image inspect (.Id)"
-            return None, f"could not resolve digest for {ref!r}: image not present locally or inspect failed"
         except Exception as exc:  # noqa: BLE001
-            return None, f"could not resolve digest for {ref!r}: {exc}"
+            raise ConfigError(f"cannot resolve a digest for --image {ref!r}: {exc}") from exc
+        if proc.returncode == 0 and digest_re.fullmatch(proc.stdout.strip().lower()):
+            return proc.stdout.strip().lower(), (
+                f"resolved --image {ref!r} via docker image inspect: only a local image ID is available "
+                "(no matching registry RepoDigests); this is not a registry manifest digest"
+            )
+        raise ConfigError(f"cannot resolve a digest for --image {ref!r}: inspect returned no usable digest")
     return None, ""
 
 
@@ -92,18 +153,31 @@ def selected_checks(settings: Settings) -> list[str]:
 
 
 def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") -> dict[str, Any]:
+    known = set(REGISTRY)
+    requested = set(settings.enabled or []) | set(settings.disabled)
+    unknown = sorted(requested - known)
+    if unknown:
+        raise ConfigError(
+            f"unknown check ID(s): {', '.join(unknown)}; run 'envcert list-checks' to see valid IDs"
+        )
     ctx = load_task(task_path, adapter_name)
-    digest, file_count = bundle_digest(ctx.root)
+    digest, file_count = bundle_digest(ctx.root, warnings=ctx.warnings)
     check_ctx = CheckContext(task=ctx, execution=settings.execution, repetitions=settings.repetitions,
                              enable_mutation=settings.enable_mutation, external_tools=settings.external_tools,
                              runner_command=settings.runner_command)
     image_digest, image_note = resolve_image_digest(settings)
-    if image_note and (settings.image or settings.image_digest):
+    if image_note and settings.image and "not a registry manifest digest" in image_note:
         ctx.warnings.append(f"image digest: {image_note}")
     findings: list[Finding] = []
     errors: list[dict[str, str]] = []
     executed: list[str] = []
-    for cid in selected_checks(settings):
+    checks_to_run = selected_checks(settings)
+    if not checks_to_run:
+        raise ConfigError(
+            "no checks selected; refusing to produce a vacuous PASS report "
+            "(review --enable/--disable and [checks] enabled/disabled)"
+        )
+    for cid in checks_to_run:
         info, fn = REGISTRY[cid]
         executed.append(cid)
         try:
@@ -120,18 +194,16 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
 
         baseline_path = Path(settings.baseline)
         if not baseline_path.is_file():
-            from envcert.core.errors import ConfigError
-
             raise ConfigError(f"baseline report not found: {baseline_path}")
         try:
             baseline_report = _json.loads(baseline_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            from envcert.core.errors import ConfigError
-
             raise ConfigError(f"baseline report is not valid JSON: {exc}") from exc
-        baseline_keys = {(f.get("check_id"), f.get("path"), f.get("line")) for f in baseline_report.get("findings", [])}
+        baseline_keys = {
+            finding_fingerprint(f) for f in baseline_report.get("findings", []) if isinstance(f, dict)
+        }
         for f in findings:
-            if (f.check_id, f.path, f.line) in baseline_keys and f.status in (Status.FAIL, Status.WARN):
+            if f.status in (Status.FAIL, Status.WARN) and finding_fingerprint(f.to_dict()) in baseline_keys:
                 f.baseline_suppressed = True
                 suppressed_count += 1
     fail_on = settings.fail_on
@@ -157,7 +229,18 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
         ri = ExternalRunner(settings.runner_command).info()
         runner_info = {"name": ri.name, "available": ri.available, "reason": ri.reason, "isolation": ri.isolation}
     if image_digest is None and check_ctx.shared.get("image_digest"):
-        image_digest = check_ctx.shared["image_digest"]
+        import re
+
+        candidate = str(check_ctx.shared["image_digest"]).lower()
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", candidate):
+            image_digest = candidate
+        else:
+            ctx.warnings.append(
+                f"runner returned invalid image_digest {check_ctx.shared['image_digest']!r}; ignored "
+                "(expected sha256:<64 hex>)"
+            )
+    if check_ctx.shared.get("image_digest_note"):
+        ctx.warnings.append(str(check_ctx.shared["image_digest_note"]))
     verifier_digest = _dir_digest(ctx, ctx.tests_dir)
     solution_digest = _dir_digest(ctx, ctx.solution_dir)
     report: dict[str, Any] = {
@@ -211,5 +294,10 @@ def _dir_digest(ctx: TaskContext, directory: Path | None) -> str | None:
     for rel in ctx.files:
         if rel.startswith(prefix):
             h.update(rel.encode())
-            h.update(sha256_file(ctx.root / rel).encode())
+            try:
+                file_digest = sha256_file(ctx.root / rel)
+            except OSError as exc:
+                ctx.warnings.append(f"could not read {rel} for directory digest: {exc}")
+                file_digest = "unreadable"
+            h.update(file_digest.encode())
     return h.hexdigest()

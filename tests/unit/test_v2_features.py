@@ -2,9 +2,12 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 from envcert.attestations.intoto import build_statement, verify_statement_local
 from envcert.core.config import load_settings
 from envcert.core.engine import resolve_image_digest, run_checks
+from envcert.core.errors import ConfigError
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"
@@ -83,8 +86,10 @@ def test_image_digest_binding_and_attestation_subject():
 def test_image_digest_resolution_from_ref():
     digest, note = resolve_image_digest(load_settings(None, None, {"image": "myimg@sha256:" + "c" * 64}))
     assert digest == "sha256:" + "c" * 64
-    digest, note = resolve_image_digest(load_settings(None, None, {"image_digest": "not-a-digest"}))
-    assert digest is None and "invalid" in note
+    with pytest.raises(ConfigError, match="invalid --image-digest"):
+        resolve_image_digest(load_settings(None, None, {"image_digest": "not-a-digest"}))
+    with pytest.raises(ConfigError, match="invalid digest"):
+        resolve_image_digest(load_settings(None, None, {"image": "myimg@sha256:short"}))
 
 
 def test_external_tools_not_run_by_default(basic_task):

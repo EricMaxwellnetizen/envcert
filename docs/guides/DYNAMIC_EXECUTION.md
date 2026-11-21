@@ -1,7 +1,10 @@
 # Dynamic execution — safety model
 
 Dynamic checks are **opt-in** (`--execution ...`). Static analysis never
-builds or runs task code.
+builds or runs task code. `[checks.dynamic] enabled = true` in `envcert.toml`
+does not select a mode: an explicit `[execution] mode` (or `--execution`) is
+required, so configuration cannot silently fall back to unsandboxed
+`local-python` execution.
 
 ## Modes
 

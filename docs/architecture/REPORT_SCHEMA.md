@@ -39,7 +39,14 @@ distinct from PASS — this distinction is a core product guarantee.
 path, `.git` excluded, symlinks not followed): `relpath \0 sha256(content) \n`;
 symlinks contribute `link:<target>` instead of a content hash. Any content
 change changes the digest; `envcert verify report.json --task <dir>`
-recomputes it.
+recomputes it. File-listing truncation and unreadable files are recorded in
+`environment.warnings` / `limitations` rather than silently hashed as empty.
+
+`envcert verify` also recomputes `policy.passed` and every `summary` counter
+from the findings (using the recorded `fail_on` severities and
+`baseline_suppressed` flags). A report whose asserted policy or counts
+disagree with its own findings is rejected with exit code 2; `envcert attest`
+refuses to build an attestation from such a report.
 
 ## Attestation binding (in-toto Test Result)
 
@@ -61,5 +68,11 @@ recomputes it.
   `result` + the report digest alone.
 
 Signing: `--dsse` wraps the statement in a DSSE envelope; `--sign` invokes
-`cosign sign-blob` when Cosign is installed. Without signing, output states
-plainly that it is unsigned and is not cryptographic evidence.
+`cosign sign-blob` and writes a detached `.sig`. If signing or OCI
+attestation was explicitly requested but could not be performed (Cosign
+missing, tlog/network failure, mutable image ref), `envcert attest` exits 3
+and says the file is unsigned. `envcert verify-attestation` verifies a
+detached `.sig` with `cosign verify-blob`; an unsigned statement/envelope
+fails unless `--allow-unsigned` is passed for structural-only checking.
+Without signing, output states plainly that it is unsigned and is not
+cryptographic evidence.

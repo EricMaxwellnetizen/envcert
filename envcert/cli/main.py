@@ -9,8 +9,8 @@ from envcert import __version__
 from envcert.attestations.intoto import (
     build_statement,
     cosign_attest_image,
-    cosign_available,
     cosign_verify_attestation,
+    cosign_verify_blob,
     dsse_envelope_unsigned,
     sign_with_cosign,
     verify_statement_local,
@@ -19,6 +19,7 @@ from envcert.checks.base import REGISTRY
 from envcert.core.config import PROFILES, load_settings
 from envcert.core.engine import run_checks
 from envcert.core.errors import EnvCertError
+from envcert.core.report import validate_report_consistency
 from envcert.core.rollup import rollup_to_text, run_dataset_rollup
 from envcert.reports.sarif import to_sarif
 from envcert.reports.text import to_text
@@ -139,22 +140,27 @@ def cmd_verify(args) -> int:
     except Exception as exc:
         print(f"error: report is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    problems = validate_report(report)
+    problems = validate_report(report) + validate_report_consistency(report)
+    if problems:
+        print("report validation FAILED:")
+        for p in problems:
+            print(f"  - {p}")
+        return EXIT_INVALID
     if args.task:
         from envcert.core.digests import bundle_digest
 
-        digest, _n = bundle_digest(Path(args.task))
+        digest_warnings: list[str] = []
+        digest, _n = bundle_digest(Path(args.task), warnings=digest_warnings)
+        for warning in digest_warnings:
+            print(f"note: {warning}", file=sys.stderr)
         recorded = (report.get("environment") or {}).get("bundle_digest_sha256")
         if recorded != digest:
-            problems.append(f"bundle digest mismatch: report={recorded} recomputed={digest} (task changed since the report was generated)")
-    if problems:
-        print("report verification FAILED:")
-        for p in problems:
-            print(f"  - {p}")
-        return EXIT_POLICY
+            print("report verification FAILED (task contents do not match the report):")
+            print(f"  - bundle digest mismatch: report={recorded} recomputed={digest} (task changed since the report was generated)")
+            return EXIT_POLICY
     print(f"report OK: schema {report.get('schema_version')}, EnvCert {report.get('envcert_version')}, "
           f"task {(report.get('environment') or {}).get('task_name')}, policy passed={ (report.get('policy') or {}).get('passed')}")
-    print("note: this verifies report structure (and bundle digest when --task is given). It does NOT verify a cryptographic signature; unsigned reports are not cryptographically verified.")
+    print("note: this verifies report schema/consistency (and the bundle digest when --task is given) by recomputing policy and summary from the findings. It does NOT verify a cryptographic signature; unsigned reports are not cryptographically verified.")
     return EXIT_OK
 
 
@@ -169,34 +175,54 @@ def cmd_attest(args) -> int:
     except Exception as exc:
         print(f"error: report is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    problems = validate_report(report)
+    problems = validate_report(report) + validate_report_consistency(report)
     if problems:
-        print(f"error: refusing to attest an invalid report: {problems[0]}", file=sys.stderr)
+        print("error: refusing to attest an invalid or inconsistent report:", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
         return EXIT_INVALID
+    if getattr(args, "image", None):
+        if "@sha256:" not in args.image:
+            print(f"error: --image must be an immutable reference name@sha256:<64 hex>, got {args.image!r}", file=sys.stderr)
+            return EXIT_INVALID
+        image_digest = "sha256:" + args.image.rsplit("@sha256:", 1)[1]
+        report_digest = (report.get("environment") or {}).get("image_digest")
+        if report_digest and image_digest != report_digest:
+            print(f"error: refusing to attest {args.image!r}: its digest {image_digest} does not match the report's "
+                  f"image_digest {report_digest}", file=sys.stderr)
+            return EXIT_INVALID
     statement = build_statement(report, raw)
     out_obj: object = dsse_envelope_unsigned(statement) if args.dsse else statement
     out_path = Path(args.output)
     out_path.write_text(json.dumps(out_obj, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {'DSSE envelope (UNSIGNED)' if args.dsse else 'in-toto statement (unsigned)'} to {out_path}")
+    failures: list[str] = []
     if getattr(args, "image", None):
         import tempfile
 
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
             json.dump(statement["predicate"], tf)
             predicate_path = Path(tf.name)
-        ok, msg = cosign_attest_image(predicate_path, args.image, args.key)
+        try:
+            ok, msg = cosign_attest_image(predicate_path, args.image, args.key)
+        finally:
+            predicate_path.unlink(missing_ok=True)
         print(msg)
-        if not ok and cosign_available():
-            return EXIT_ERROR
+        if not ok:
+            failures.append("OCI image attestation")
     print(f"predicateType: {statement['predicateType']}  result: {statement['predicate']['result']}")
     if args.sign:
         ok, msg = sign_with_cosign(out_path, args.key)
         print(msg)
-        if not ok and cosign_available():
-            return EXIT_ERROR
+        if not ok:
+            failures.append("signing")
     else:
         print("signing: not performed. To sign: install cosign and re-run with --sign [--key cosign.key], "
               "or use `cosign sign-blob`. An unsigned attestation is NOT cryptographic evidence.")
+    if failures:
+        print(f"error: requested {', '.join(failures)} did not complete; the statement file was written but is not "
+              "cryptographically signed/attested.", file=sys.stderr)
+        return EXIT_ERROR
     return EXIT_OK
 
 
@@ -257,7 +283,8 @@ def cmd_verify_attestation(args) -> int:
         print(f"error: attestation is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
     statement = obj
-    if obj.get("payload") and obj.get("payloadType", "").startswith("application/vnd.in-toto"):
+    signed = False
+    if isinstance(obj, dict) and obj.get("payload") and str(obj.get("payloadType", "")).startswith("application/vnd.in-toto"):
         import base64
 
         try:
@@ -265,20 +292,45 @@ def cmd_verify_attestation(args) -> int:
         except Exception as exc:
             print(f"error: cannot decode DSSE payload: {exc}", file=sys.stderr)
             return EXIT_INVALID
-        if not obj.get("signatures"):
-            print("note: DSSE envelope carries no signatures; only structural verification is possible locally")
+        signatures = obj.get("signatures")
+        if signatures is None:
+            signatures = []
+        if not isinstance(signatures, list):
+            print("error: DSSE envelope signatures is not a list", file=sys.stderr)
+            return EXIT_INVALID
+        signed = bool(signatures)
     problems = verify_statement_local(statement)
     if problems:
         print("attestation structural verification FAILED:")
         for pr in problems:
             print(f"  - {pr}")
         return EXIT_POLICY
-    print(f"attestation structure OK: predicateType={statement.get('predicateType')}, result={statement['predicate'].get('result')}, subjects={len(statement.get('subject') or [])}")
+    signature_path = path.with_name(path.name + ".sig")
+    signature_verified = False
+    if signature_path.is_file():
+        ok, msg = cosign_verify_blob(path, signature_path, args.key)
+        print(msg)
+        if not ok:
+            return EXIT_POLICY
+        signature_verified = True
+        signed = True
+    if not signed and not args.allow_unsigned and not args.image:
+        print("attestation verification FAILED: the statement/envelope carries no signatures.")
+        print("  - structural validity alone is not cryptographic evidence; pass --allow-unsigned to check structure only,")
+        print("    or verify a signed attestation attached to an image with --image name@sha256:...")
+        return EXIT_POLICY
+    print(f"attestation structure OK: signed={signed}, signature_verified={signature_verified}, "
+          f"predicateType={statement.get('predicateType')}, result={statement['predicate'].get('result')}, "
+          f"subjects={len(statement.get('subject') or [])}")
     if args.image:
         ok, msg = cosign_verify_attestation(args.image, args.key, args.policy)
         print(msg)
         return EXIT_OK if ok else EXIT_POLICY
-    print("note: no --image given, so no cryptographic verification was performed; structural OK is not a signature check")
+    if not signed:
+        print("note: --allow-unsigned given, so this is structural verification only; it is NOT cryptographic evidence")
+    elif not signature_verified:
+        print("note: signatures are present, but local structural verification does not verify them cryptographically; "
+              "use --image name@sha256:... or cosign verify-blob with the signer's key")
     return EXIT_OK
 
 
@@ -368,6 +420,8 @@ def build_parser() -> argparse.ArgumentParser:
     pva.add_argument("--image", default=None, help="OCI image reference to verify the attestation against with cosign")
     pva.add_argument("--key", default=None, help="cosign public key (omit for keyless with permissive identity regexp)")
     pva.add_argument("--policy", default=None, help="CUE/Rego policy file passed to cosign verify-attestation")
+    pva.add_argument("--allow-unsigned", action="store_true",
+                     help="allow structural-only verification of an unsigned statement/envelope (never cryptographic evidence)")
     pva.set_defaults(fn=cmd_verify_attestation)
 
     pi = sub.add_parser("init", help="write a starter envcert.toml")

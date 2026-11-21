@@ -92,23 +92,29 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
     prof = PROFILES[chosen_profile]
     s.categories = prof["categories"]
     s.fail_on = _parse_fail_on(prof["fail_on"], f"profile {chosen_profile}")
+    dynamic_requested = False
     checks = data.get("checks") or {}
     if checks:
         enabled = checks.get("enabled")
         if enabled is not None:
-            if enabled == ["all"] or enabled == "all":
+            if (isinstance(enabled, list) and len(enabled) == 1 and str(enabled[0]).lower() == "all") or str(enabled).lower() == "all":
                 s.enabled = None
             elif isinstance(enabled, list):
-                s.enabled = [str(x) for x in enabled]
+                if not enabled:
+                    raise ConfigError("[checks] enabled must not be empty; use [\"all\"] or list at least one check ID")
+                s.enabled = [str(x).upper() for x in enabled]
             else:
                 raise ConfigError("[checks] enabled must be a list of check IDs or [\"all\"]")
         disabled = checks.get("disabled") or []
         if not isinstance(disabled, list):
             raise ConfigError("[checks] disabled must be a list of check IDs")
-        s.disabled = [str(x) for x in disabled]
+        s.disabled = [str(x).upper() for x in disabled]
         dyn = checks.get("dynamic") or {}
         if dyn.get("enabled"):
-            s.execution = "local-python"
+            # Dynamic checks run code from the task.  Never infer that from a
+            # boolean alone: the execution mode (and therefore the isolation
+            # boundary) must be chosen explicitly.
+            dynamic_requested = True
         if "repetitions" in dyn:
             s.repetitions = int(dyn["repetitions"])
     policy = data.get("policy") or {}
@@ -134,9 +140,13 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
         if overrides.get("execution"):
             s.execution = overrides["execution"]
         if overrides.get("enable"):
-            s.enabled = list(overrides["enable"])
+            requested = [str(x) for x in overrides["enable"]]
+            if len(requested) == 1 and requested[0].lower() == "all":
+                s.enabled = None
+            else:
+                s.enabled = [x.upper() for x in requested]
         if overrides.get("disable"):
-            s.disabled = list(overrides["disable"])
+            s.disabled = [str(x).upper() for x in overrides["disable"]]
         if overrides.get("repetitions"):
             s.repetitions = int(overrides["repetitions"])
         if overrides.get("mutation"):
@@ -153,6 +163,12 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
             s.baseline = str(overrides["baseline"])
     if s.execution not in ("none", "docker", "local-python", "external"):
         raise ConfigError(f"unknown execution mode {s.execution!r}; expected none, docker, local-python or external")
+    if dynamic_requested and s.execution == "none":
+        raise ConfigError(
+            "[checks.dynamic] enabled = true requires an explicit execution mode; "
+            "set [execution] mode = \"local-python\" (trusted tasks only, no sandbox) or \"docker\", "
+            "or pass --execution. EnvCert will not silently run task code unsandboxed."
+        )
     if s.repetitions < 1 or s.repetitions > 20:
         raise ConfigError("repetitions must be between 1 and 20")
     return s

@@ -1,11 +1,12 @@
-# Release readiness — EnvCert 0.2.0
+# Release readiness — EnvCert 0.3.0
 
-Status as of 2026-11-22: **release candidate in a private GitHub repository; not published.**
-The private repo https://github.com/EricMaxwellnetizen/envcert was created and the code pushed on 2026-11-22. No version tag, GitHub release or PyPI upload has been performed.
+Status as of 2026-11-22: **published.**
+Public repo https://github.com/EricMaxwellnetizen/envcert (initially private, made public the same day). Versions 0.1.0, 0.2.0 and 0.3.0 are tagged, released on GitHub, and published to PyPI via Trusted Publishing.
 
 | Item | Status |
 |---|---|
-| Current version | 0.2.0 (`envcert/__init__.py`, pyproject); 0.1.0 and 0.2.0 published (public repo, tags, GitHub releases, PyPI via Trusted Publishing; 0.2.0 release run 44954305542 build+publish succeeded, verified by clean-venv pip install) |
+| Current version | 0.3.0 (`envcert/__init__.py`, pyproject); 0.1.0, 0.2.0 and 0.3.0 published (public repo, tags, GitHub releases, PyPI via Trusted Publishing; each release verified by clean-venv pip install) |
+| 0.3.0 features | EC065 NeMo verify() probing, EC055 Inspect scorer strength, `check --dataset` rollups, coverage-aware EC063, `--baseline`/SARIF suppressions/`envcert diff`, Inspect external-runner example — fixture-tested; Cosign registry round-trip verified live against a local OCI registry |
 | 0.2.0 features | NeMo Gym + Inspect adapters, EC004 multi-step, Docker EC061/EC062/EC064, OCI image digests + Cosign OCI attestation/verify-attestation, external (VM) runner protocol, companion tools EC070–EC072, richer mutation operators — all fixture-tested; Docker + Hadolint paths verified live (Docker 29.7.2, Hadolint 2.12.0) |
 | Installation method | `pip install .` from this repo now; `pip install envcert` after PyPI publication |
 | Package build | ✅ `python -m build` succeeds; wheel+sdist in `dist/`; wheel verified in a clean venv (CLI runs, schema ships in the wheel) |

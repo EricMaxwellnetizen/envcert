@@ -16,7 +16,8 @@ The private repo https://github.com/EricMaxwellnetizen/envcert was created and t
 | GitHub Action | `action.yml` (composite) + examples prepared; **not exercised on GitHub** from this workspace |
 | Attestation status | in-toto Test Result generation + DSSE envelope implemented and unit-tested; Cosign signing is optional and untested here (cosign not installed); unsigned output is labelled as such |
 | Tests / lint / types | 66 passed, 1 skipped (Windows symlink privilege); coverage 80%; ruff clean; mypy clean — see docs/QUALITY_REPORT.md |
-| Outstanding release blockers | (1) Run CI + a Docker-enabled dynamic run on a real runner/daemon. (2) Replace placeholder base-image digests in examples if the images are to be built. (3) Configure PyPI Trusted Publishing for `EricMaxwellnetizen/envcert`. |
+| GitHub CI | ✅ Passed on GitHub for the pushed `main` (run 44949955463: ubuntu/windows/macos × Python 3.11/3.12/3.13, plus package build/install smoke test); Security workflow run 44949955506 also passed |
+| Outstanding release blockers | (1) A Docker-enabled dynamic run against a live daemon (not yet exercised; example Dockerfiles carry placeholder digests). (2) Replace placeholder base-image digests in examples if the images are to be built. (3) Configure PyPI Trusted Publishing for `EricMaxwellnetizen/envcert`. |
 | Not done (needs owner credentials/decision) | Making the repo public, version tag, GitHub release, PyPI upload, Cosign key management |
 
 ## Steps to publish (owner)

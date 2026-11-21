@@ -1,0 +1,8 @@
+schema_version = "1.4"
+[task]
+name = "envcert/python-calc"
+[verifier]
+timeout_sec = 60.0
+environment_mode = "separate"
+[environment]
+network_mode = "no-network"

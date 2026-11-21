@@ -1,0 +1,199 @@
+# Check catalog
+
+Stable check IDs are a public interface: IDs are never reused, and a retired check keeps its ID reserved. nvcert list-checks -v prints the same data from the installed package.
+
+## EC001 - Task structure is recognisable and complete
+
+- Category: structure  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Task has the files its framework requires (config, instruction, verifier, environment).
+- Remediation: Add the missing task.toml / instruction.md / tests / environment files for your framework.
+- Limitations: Only Harbor and generic Docker layouts are recognised in this version.
+
+## EC002 - Instruction is present and non-trivial
+
+- Category: structure  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: instruction.md exists, is non-empty and contains no unresolved placeholders.
+- Remediation: Write a complete instruction.md without TODO/placeholder text.
+- Limitations: (none recorded)
+
+## EC003 - Reference solution is present (or its absence is explicit)
+
+- Category: structure  |  Default severity on failure: LOW  |  Dynamic: False
+- Description: A reference/oracle solution exists so the verifier can be sanity-checked.
+- Remediation: Add solution/solve.sh (Harbor) or document why no reference solution exists.
+- Limitations: Some frameworks source solutions externally; then this is informational.
+
+## EC010 - No exposed version-control metadata in agent-visible paths
+
+- Category: leakage  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: .git data inside the build context or environment can leak hidden reference material and history.
+- Remediation: Exclude .git via .dockerignore, do not COPY it into the image, and strip VCS data from published images.
+- Limitations: Static analysis cannot prove the agent can read the path at runtime; exposure is assessed from the build context and COPY instructions.
+
+## EC011 - Reference solution is not copied into the agent environment
+
+- Category: leakage  |  Default severity on failure: CRITICAL  |  Dynamic: False
+- Description: Solution/answer material must not be included in the Docker build context or copied into agent-visible paths.
+- Remediation: Keep solution/ outside the build context, exclude it in .dockerignore, and never COPY solution material into the image.
+- Limitations: Runtime mounts configured outside this task directory cannot be seen statically.
+
+## EC012 - No known answer / gold files in agent-visible paths
+
+- Category: leakage  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Files with answer-like names (gold patch, expected output, answers) inside the environment can be read by the agent.
+- Remediation: Move expected outputs and gold patches into tests/ (uploaded only at verification time) or remove them.
+- Limitations: Name-based heuristic; a file with an answer-like name may be an innocent fixture.
+
+## EC013 - No hard-coded secrets or credentials in task material
+
+- Category: leakage  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Hard-coded API keys/tokens/passwords in task files can leak and indicate exposed evaluation data.
+- Remediation: Use ${VAR} host-environment references (Harbor) or CI secrets; rotate any committed credential.
+- Limitations: Pattern-based; example/dummy values are flagged for human review, not asserted to be live credentials.
+
+## EC014 - Instruction does not disclose solution or hidden-test content
+
+- Category: leakage  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: The instruction given to the agent must not contain the reference solution or hidden expected outputs.
+- Remediation: Remove solution code / expected outputs from instruction.md; describe the task, not the answer.
+- Limitations: Heuristic overlap detection; short common tokens are ignored.
+
+## EC020 - Verifier runs separated from the agent where the framework supports it
+
+- Category: boundary  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Shared agent/verifier execution lets agent state influence verification. Harbor supports verifier.environment_mode='separate'.
+- Remediation: Set [verifier] environment_mode = "separate" (with declared artifacts), or document why shared verification is required.
+- Limitations: Some tasks legitimately need shared state (live services); this is a warning, not proof of exploitability.
+
+## EC021 - No agent-controlled Python import shadowing on verifier paths
+
+- Category: boundary  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: sitecustomize/usercustomize/conftest or shadow modules in agent-writable, verifier-imported paths can alter verifier behaviour.
+- Remediation: Keep import-shadowing files out of the agent environment; run the verifier with a clean PYTHONPATH and isolated rootdir.
+- Limitations: Whether pytest/Python actually imports the file depends on runtime cwd/PYTHONPATH, which is assessed heuristically.
+
+## EC022 - No executable shadowing of verifier tooling
+
+- Category: boundary  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Agent-placed executables named like verifier tools (pytest, python, test.sh) earlier on PATH can replace the real tool.
+- Remediation: Do not ship tool-named executables in the agent workdir; invoke verifiers by absolute path.
+- Limitations: PATH order at verification time is inferred from the Dockerfile/task config.
+
+## EC023 - Verifier/test directories are not made world-writable in the image
+
+- Category: boundary  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: chmod 777 / a+w on verifier, test or system paths lets the agent tamper with verification.
+- Remediation: Use least-privilege permissions; make /tests read-only where the framework allows.
+- Limitations: Runtime framework uploads may reset permissions; this checks what the task itself declares.
+
+## EC024 - No shared writable mounts or Docker socket exposure
+
+- Category: boundary  |  Default severity on failure: CRITICAL  |  Dynamic: False
+- Description: Host mounts, docker.sock or privileged settings in compose/task config collapse the agent/host boundary.
+- Remediation: Remove docker.sock and host mounts; never run task containers privileged.
+- Limitations: Only mounts declared inside this task directory are visible.
+
+## EC030 - Base images are pinned to a digest or specific tag
+
+- Category: docker  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Floating tags (latest / untagged) make builds non-reproducible and silently change the environment.
+- Remediation: Pin base images as name:tag@sha256:<digest>.
+- Limitations: Tag pinning without a digest is reported as a warning-level reproducibility issue, not a vulnerability.
+
+## EC031 - Container does not default to root without justification
+
+- Category: docker  |  Default severity on failure: LOW  |  Dynamic: False
+- Description: Running as root widens the impact of agent code; a non-root USER is defence in depth.
+- Remediation: Add a non-root USER for the agent phase where the task allows it.
+- Limitations: Many benchmark tasks legitimately need root; classified as hardening, not benchmark-integrity failure.
+
+## EC032 - No dangerous Dockerfile patterns (remote ADD, curl|sh, privileged hints)
+
+- Category: docker  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Remote ADD and pipe-to-shell installs execute unreviewed remote code at build time.
+- Remediation: Download with a pinned URL + checksum verification, or vendor the artifact.
+- Limitations: Build-time network content cannot be inspected statically.
+
+## EC033 - Network policy is declared and not silently unrestricted
+
+- Category: docker  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Harbor defaults to public network when network_mode is omitted; unrestricted egress enables answer retrieval.
+- Remediation: Set [environment] network_mode = "no-network" or "allowlist" with allowed_hosts, unless the task truly needs public access.
+- Limitations: A task may legitimately need network access; the finding reports the declared policy and its risk.
+
+## EC040 - Python dependencies are pinned / locked
+
+- Category: dependencies  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Unpinned pip installs make the environment non-reproducible and vulnerable to silent upstream changes.
+- Remediation: Pin versions with == (or hashes) and commit a lockfile (uv.lock / poetry.lock / Pipfile.lock).
+- Limitations: A missing lockfile is a reproducibility signal, not a confirmed vulnerability.
+
+## EC041 - External downloads at build/run time are pinned or checksummed
+
+- Category: dependencies  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Unversioned downloads (git clone without commit, unversioned URLs) can change the environment silently.
+- Remediation: Pin commits/versions and verify checksums for downloaded artifacts.
+- Limitations: (none recorded)
+
+## EC050 - Verifier exists and is non-empty
+
+- Category: verifier  |  Default severity on failure: CRITICAL  |  Dynamic: False
+- Description: A missing or empty verifier cannot distinguish correct from incorrect work.
+- Remediation: Provide tests/test.sh (Harbor) that runs real assertions and writes a reward.
+- Limitations: (none recorded)
+
+## EC051 - Verifier produces a reward in the framework's expected location
+
+- Category: verifier  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Harbor verifiers must write /logs/verifier/reward.txt or reward.json; otherwise every run scores 0 / is masked.
+- Remediation: Write the numeric reward to /logs/verifier/reward.txt (or reward.json) on every code path.
+- Limitations: Dynamic reward production is only proven by execution; this checks the code mentions the contract.
+
+## EC052 - No unconditional-success path in the verifier
+
+- Category: verifier  |  Default severity on failure: CRITICAL  |  Dynamic: False
+- Description: A verifier that always reports success (echo 1 without conditions, assert True only, sys.exit(0)) accepts any submission.
+- Remediation: Gate the success reward on real assertions; ensure failures write reward 0.
+- Limitations: AST/text heuristics cannot prove semantic correctness; flagged patterns need human confirmation.
+
+## EC053 - Verifier contains substantive assertions
+
+- Category: verifier  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Verifiers that only check file existence or trivial substrings accept incorrect solutions (see BenchJack V-class flaws).
+- Remediation: Assert on computed outputs/behaviour, include negative cases, and compare against expected values.
+- Limitations: Assertion counting is a strength signal, not proof the assertions are semantically correct.
+
+## EC054 - Verifier does not trust agent-controlled result files without validation
+
+- Category: verifier  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Reading a score/reward the agent itself wrote, or parsing agent stdout loosely, lets the agent report its own grade.
+- Remediation: Compute the reward inside the verifier from raw artifacts; validate any agent-produced file strictly.
+- Limitations: Heuristic; some tasks legitimately read agent output files — they must validate content, which needs human review.
+
+## EC060 - Reference (gold) solution passes the verifier
+
+- Category: dynamic  |  Default severity on failure: HIGH  |  Dynamic: True
+- Description: Executing the reference solution should produce the expected (passing) reward.
+- Remediation: Fix the reference solution or the verifier so a correct solution passes.
+- Limitations: Only supported for docker (Harbor shell tasks) and local-python (pytest tasks) execution.
+
+## EC061 - Negative control (no-op/empty) is rejected by the verifier
+
+- Category: dynamic  |  Default severity on failure: HIGH  |  Dynamic: True
+- Description: A no-op or empty submission should not pass, unless the task semantics say otherwise.
+- Remediation: Strengthen the verifier so trivial submissions fail.
+- Limitations: Some tasks legitimately pass with no action; then this returns NOT_APPLICABLE/WARN for human review, not a hard failure.
+
+## EC062 - Verifier outcome is repeatable across repetitions
+
+- Category: dynamic  |  Default severity on failure: MEDIUM  |  Dynamic: True
+- Description: Re-running gold verification should give a consistent reward/exit outcome.
+- Remediation: Remove nondeterminism (time, randomness, network, ordering) from the task or verifier.
+- Limitations: Compares reward/exit outcome, not bitwise-identical stdout.
+
+## EC063 - Mutation testing: verifier rejects mutated (incorrect) solutions
+
+- Category: mutation  |  Default severity on failure: MEDIUM  |  Dynamic: True
+- Description: Mutated variants of a correct Python solution should be rejected; the rejection rate is a verifier-strength signal.
+- Remediation: Add assertions covering the mutated behaviour; do not treat the rate as proof of correctness.
+- Limitations: Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest tasks only.

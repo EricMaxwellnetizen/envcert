@@ -1,0 +1,98 @@
+name: EnvCert
+description: Integrity checks and evidence for AI training/evaluation environments (Harbor tasks)
+author: EnvCert contributors
+branding:
+  icon: shield
+  color: blue
+inputs:
+  path:
+    description: Task directory to check
+    required: false
+    default: "."
+  profile:
+    description: "Validation profile: harbor, strict, minimal or ci"
+    required: false
+    default: "harbor"
+  fail-on:
+    description: Comma-separated severities that fail the job
+    required: false
+    default: "critical,high"
+  format:
+    description: "Report format written to the report output: json or sarif"
+    required: false
+    default: "json"
+  report:
+    description: Report file to write
+    required: false
+    default: "envcert-report.json"
+  sarif:
+    description: Optional SARIF file to write (for GitHub code scanning upload)
+    required: false
+    default: ""
+  execution:
+    description: "Dynamic execution mode: none (default, static only), docker, local-python"
+    required: false
+    default: "none"
+  version:
+    description: EnvCert version to install from PyPI (ignored when this action is used from a local checkout containing pyproject.toml)
+    required: false
+    default: ""
+  upload-artifact:
+    description: Upload reports as workflow artifacts (true/false)
+    required: false
+    default: "true"
+outputs:
+  report:
+    description: Path of the written report
+    value: ${{ inputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: "3.12"
+    - name: Install EnvCert
+      shell: bash
+      env:
+        ENVCERT_VERSION: ${{ inputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ -f "$ACTION_PATH/pyproject.toml" ] && grep -q 'name = "envcert"' "$ACTION_PATH/pyproject.toml"; then
+          python -m pip install "$ACTION_PATH"
+        elif [ -n "$ENVCERT_VERSION" ]; then
+          python -m pip install "envcert==$ENVCERT_VERSION"
+        else
+          python -m pip install envcert
+        fi
+        envcert version
+    - name: Run EnvCert (static by default)
+      shell: bash
+      env:
+        TASK_PATH: ${{ inputs.path }}
+        PROFILE: ${{ inputs.profile }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        FORMAT: ${{ inputs.format }}
+        REPORT: ${{ inputs.report }}
+        SARIF: ${{ inputs.sarif }}
+        EXECUTION: ${{ inputs.execution }}
+      run: |
+        set -euo pipefail
+        args=(check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format "$FORMAT" --output "$REPORT")
+        echo "+ envcert ${args[*]}"
+        status=0
+        envcert "${args[@]}" || status=$?
+        if [ -n "$SARIF" ]; then
+          envcert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format sarif --output "$SARIF" || true
+        fi
+        exit "$status"
+    - name: Upload reports
+      if: ${{ inputs.upload-artifact == 'true' && !cancelled() }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: envcert-reports
+        path: |
+          ${{ inputs.report }}
+          ${{ inputs.sarif }}
+        if-no-files-found: ignore

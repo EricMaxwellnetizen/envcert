@@ -1,0 +1,16 @@
+{
+  "task": "examples/safe-environment",
+  "policy_passed": true,
+  "checks": {
+    "EC001": "PASS",
+    "EC010": "PASS",
+    "EC011": "PASS",
+    "EC020": "PASS",
+    "EC030": "PASS",
+    "EC033": "PASS",
+    "EC050": "PASS",
+    "EC051": "PASS",
+    "EC052": "PASS",
+    "EC060": "NOT_RUN"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "task": "examples/intentionally-vulnerable-environment",
+  "policy_passed": false,
+  "checks": {
+    "EC010": "FAIL",
+    "EC011": "FAIL",
+    "EC012": "WARN",
+    "EC013": "WARN",
+    "EC014": "WARN",
+    "EC020": "WARN",
+    "EC021": "WARN",
+    "EC022": "WARN",
+    "EC023": "WARN",
+    "EC030": "WARN",
+    "EC032": "WARN",
+    "EC040": "WARN",
+    "EC052": "FAIL",
+    "EC053": "WARN"
+  }
+}

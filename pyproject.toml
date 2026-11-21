@@ -7,7 +7,7 @@ name = "envcert"
 version = "0.1.0"
 description = "Independent, extensible integrity verification and evidence generation for AI training and evaluation environments"
 readme = "README.md"
-license = "Apache-2.0"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 authors = [{ name = "EnvCert contributors" }]
 keywords = ["ai", "evaluation", "benchmark", "verification", "harbor", "attestation", "reward-hacking"]

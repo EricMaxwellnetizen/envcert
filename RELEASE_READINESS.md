@@ -5,7 +5,7 @@ The private repo https://github.com/EricMaxwellnetizen/envcert was created and t
 
 | Item | Status |
 |---|---|
-| Current version | 0.2.0 (`envcert/__init__.py`, pyproject); 0.1.0 previously published (public repo, tag, GitHub release, PyPI via Trusted Publishing) |
+| Current version | 0.2.0 (`envcert/__init__.py`, pyproject); 0.1.0 and 0.2.0 published (public repo, tags, GitHub releases, PyPI via Trusted Publishing; 0.2.0 release run 44954305542 build+publish succeeded, verified by clean-venv pip install) |
 | 0.2.0 features | NeMo Gym + Inspect adapters, EC004 multi-step, Docker EC061/EC062/EC064, OCI image digests + Cosign OCI attestation/verify-attestation, external (VM) runner protocol, companion tools EC070–EC072, richer mutation operators — all fixture-tested; Docker + Hadolint paths verified live (Docker 29.7.2, Hadolint 2.12.0) |
 | Installation method | `pip install .` from this repo now; `pip install envcert` after PyPI publication |
 | Package build | ✅ `python -m build` succeeds; wheel+sdist in `dist/`; wheel verified in a clean venv (CLI runs, schema ships in the wheel) |

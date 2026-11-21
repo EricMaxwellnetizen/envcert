@@ -1,7 +1,7 @@
 # Release readiness — EnvCert 0.1.0
 
-Status as of 2026-11-22: **release candidate prepared locally; not published.**
-Nothing has been pushed, tagged or uploaded anywhere.
+Status as of 2026-11-22: **release candidate in a private GitHub repository; not published.**
+The private repo https://github.com/EricMaxwellnetizen/envcert was created and the code pushed on 2026-11-22. No version tag, GitHub release or PyPI upload has been performed.
 
 | Item | Status |
 |---|---|
@@ -16,12 +16,12 @@ Nothing has been pushed, tagged or uploaded anywhere.
 | GitHub Action | `action.yml` (composite) + examples prepared; **not exercised on GitHub** from this workspace |
 | Attestation status | in-toto Test Result generation + DSSE envelope implemented and unit-tested; Cosign signing is optional and untested here (cosign not installed); unsigned output is labelled as such |
 | Tests / lint / types | 66 passed, 1 skipped (Windows symlink privilege); coverage 80%; ruff clean; mypy clean — see docs/QUALITY_REPORT.md |
-| Outstanding release blockers | (1) Run CI + a Docker-enabled dynamic run on a real runner/daemon. (2) Replace placeholder base-image digests in examples if the images are to be built. (3) Decide the canonical GitHub org/repo (`github.com/envcert/envcert` is used as a placeholder URL throughout). (4) Configure PyPI Trusted Publishing. |
-| Not done (needs owner credentials/decision) | git remote + push, version tag, GitHub release, PyPI upload, Cosign key management |
+| Outstanding release blockers | (1) Run CI + a Docker-enabled dynamic run on a real runner/daemon. (2) Replace placeholder base-image digests in examples if the images are to be built. (3) Configure PyPI Trusted Publishing for `EricMaxwellnetizen/envcert`. |
+| Not done (needs owner credentials/decision) | Making the repo public, version tag, GitHub release, PyPI upload, Cosign key management |
 
 ## Steps to publish (owner)
 
-1. Create the GitHub repository, add it as `origin`, push `main`.
+1. Make the private repository public when ready (Settings → General → Danger Zone), after confirming no sensitive material is in history.
 2. Watch the CI workflow go green (all OS/Python cells + package smoke test).
 3. On PyPI, create the `envcert` project with a Trusted Publisher pointing at
    this repo's `release.yml` + `pypi` environment.

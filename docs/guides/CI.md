@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./            # this repository's action.yml; or envcert/envcert@v0.1.0 once published
+      - uses: ./            # this repository's action.yml; or EricMaxwellnetizen/envcert@v0.1.0 once tagged
         with:
           path: ./my-task
           fail-on: critical,high

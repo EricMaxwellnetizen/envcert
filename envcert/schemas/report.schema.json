@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/envcert/envcert/schemas/report-1.0.0.json",
+  "$id": "https://github.com/EricMaxwellnetizen/envcert/schemas/report-1.0.0.json",
   "title": "EnvCert Report",
   "type": "object",
   "required": ["schema_version", "envcert_version", "generated_at", "environment", "execution", "checks_executed", "findings", "summary", "policy", "limitations"],

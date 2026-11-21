@@ -32,9 +32,9 @@ dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6", "mypy>=1.10", "jsonschema>
 envcert = "envcert.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/envcert/envcert"
-Repository = "https://github.com/envcert/envcert"
-Issues = "https://github.com/envcert/envcert/issues"
+Homepage = "https://github.com/EricMaxwellnetizen/envcert"
+Repository = "https://github.com/EricMaxwellnetizen/envcert"
+Issues = "https://github.com/EricMaxwellnetizen/envcert/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["envcert"]

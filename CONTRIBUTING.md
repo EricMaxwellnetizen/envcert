@@ -5,7 +5,7 @@ Thanks for helping make evaluation environments more trustworthy.
 ## Setup
 
 ```bash
-git clone https://github.com/envcert/envcert
+git clone https://github.com/EricMaxwellnetizen/envcert
 cd envcert
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"

@@ -42,7 +42,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
         "version": "2.1.0",
         "runs": [{
             "tool": {"driver": {"name": "EnvCert", "version": __version__,
-                                "informationUri": "https://github.com/envcert/envcert", "rules": rules}},
+                                "informationUri": "https://github.com/EricMaxwellnetizen/envcert", "rules": rules}},
             "results": results,
             "properties": {"envcert_report_schema": report.get("schema_version"),
                            "bundle_digest_sha256": (report.get("environment") or {}).get("bundle_digest_sha256"),

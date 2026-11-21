@@ -30,10 +30,10 @@ else can reproduce that*.
 Requires Python 3.11+.
 
 ```bash
-pip install envcert          # once published to PyPI
-# From this repository (current):
+pip install envcert          # from PyPI
+pipx install envcert         # or isolated
+# From a checkout of this repository:
 pip install .
-pipx install .               # or isolated
 ```
 
 The core has **zero runtime dependencies**: static analysis works offline,

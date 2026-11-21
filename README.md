@@ -133,6 +133,14 @@ extension are specified in `docs/architecture/REPORT_SCHEMA.md`.
 
 ## GitHub Actions
 
+```yaml
+- uses: EricMaxwellnetizen/envcert@v0.3.0   # or @v0 for the latest 0.x
+  with:
+    path: ./my-task
+    fail-on: critical,high
+    sarif: envcert.sarif   # optional, for GitHub code scanning
+```
+
 See `action.yml` (composite action), `examples/github-actions/` and
 `docs/guides/CI.md`. Static checks by default; dynamic execution only when
 you explicitly select it.
@@ -146,7 +154,7 @@ input/config · `3` internal/execution error.
 |---|---|
 | Harbor task directories (task.toml schema 1.x, incl. multi-step `steps/`) | Implemented and fixture-tested |
 | Generic Docker task bundles (Dockerfile + tests/solution) | Implemented, reduced-confidence heuristics |
-| NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static; Resources-Server HTTP probing is roadmap) — `examples/nemo-gym-dataset` |
+| NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static + EC065 probing; Resources-Server HTTP probing not yet) — `examples/nemo-gym-dataset` |
 | Inspect AI evaluations (@task Python files) | Implemented (static) — `examples/inspect-eval` |
 
 Dynamic execution modes: `docker` (restricted), `local-python` (trusted
@@ -178,4 +186,5 @@ python -m build
 ## Licence
 
 Apache-2.0. Research and design rationale: `docs/research/`,
-`docs/architecture/`. Release status: `RELEASE_READINESS.md`.
+`docs/architecture/`. Release history: `CHANGELOG.md` and GitHub Releases.
+Future work is tracked in GitHub Issues.

@@ -15,7 +15,7 @@ official docs, papers) listed below. Claims are separated into *verified*
 | Inspect AI | https://github.com/UKGovernmentBEIS/inspect_ai , https://inspect.aisi.org.uk/sandboxing.html | Evaluation framework (UK AISI): tasks = dataset + solver(s) + scorer(s); sandbox integrations (Docker built in, k8s/VM extensions); reproducibility via structured JSON logs; not a task-bundle integrity checker |
 | in-toto attestation | https://github.com/in-toto/attestation/blob/main/spec/predicates/test-result.md , spec/v1 | Statement v1 (`https://in-toto.io/Statement/v1`), vetted **Test Result** predicate (`https://in-toto.io/attestation/test-result/v0.1`, result PASSED/FAILED + configurationSource) and Simple Verification Result; DSSE envelope is the recommended signing layer |
 | Cosign / Sigstore | https://docs.sigstore.dev/cosign/verifying/attestation/ , github.com/sigstore/cosign | `cosign attest --predicate --type`, `verify-attestation` with CUE/Rego policies; attestations bind to OCI image digests; sign-blob for arbitrary files |
-| SWE-ABS | Research topic named in the brief; no primary repo was verified during this session | Treated as *unknown*: understood only as "test-strengthening for SWE-bench-style suites". No EnvCert feature depends on unverified SWE-ABS claims. |
+| SWE-ABS | No primary repo was verified during the initial research | Treated as *unknown*: understood only as "test-strengthening for SWE-bench-style suites". No EnvCert feature depends on unverified SWE-ABS claims. |
 
 ## Key discoveries
 
@@ -67,4 +67,4 @@ use an LLM, and does not claim formal (Z3) proof.
   digest that must be replaced before actually building; documented inline).
 - Whether Harbor's registry will standardise a task "integrity" metadata
   block that EnvCert should emit into; no such block was found in schema 1.4.
-- SWE-ABS internals (not verified; deferred, see ROADMAP).
+- SWE-ABS internals (not verified; deferred — tracked in GitHub Issues).

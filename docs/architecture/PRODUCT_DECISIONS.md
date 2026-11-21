@@ -40,8 +40,8 @@ certification authority, and it never claims an environment is unhackable.
   documented in REPORT_SCHEMA.md).
 - No numerical "quality score" (conceals critical failures; policy on explicit
   findings instead — per brief §4.3).
-- No NeMo Gym / Inspect adapters yet (listed as future adapters; not promised
-  as supported — see ROADMAP.md).
+- (0.1.0 scope) No NeMo Gym / Inspect adapters yet. Both were added in
+  0.2.0; see CHANGELOG.md. Future work is tracked in GitHub Issues.
 
 ## Validated / rejected product hypotheses (brief §1.3)
 
@@ -49,7 +49,7 @@ certification authority, and it never claims an environment is unhackable.
 |---|---|
 | Deterministic explainable checks | Validated — core design; every finding carries evidence, confidence, limitations |
 | CI-native execution | Validated — exit codes, SARIF, composite Action, static default |
-| Cross-framework compatibility | Partially — Harbor + generic implemented; others deferred honestly |
+| Cross-framework compatibility | Validated in 0.2.0 — Harbor, generic, NeMo Gym and Inspect adapters implemented |
 | Reusable validation profiles | Validated — harbor/strict/minimal/ci profiles in TOML-selectable form |
 | Structured evidence | Validated — JSON Schema + per-finding evidence objects |
 | Portable digest-bound attestations | Validated — in-toto Test Result, subject = bundle/verifier/solution digests |

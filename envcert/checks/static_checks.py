@@ -220,7 +220,7 @@ def check_solution_present(c: CheckContext) -> list:
 def check_git_exposed(c: CheckContext) -> list:
     ctx = c.task
     # Files under .git are not enumerated by our walker if huge; also check dirs via known markers
-    markers = [f for f in ctx.files if ".git/" in f]
+    markers = [f for f in ctx.files if ".git/" in f or "/.git" in f or f.startswith(".git") or "/.git" in ("/" + f)]
     if ctx.build_context is not None:
         ctx_rel = ctx.build_context.relative_to(ctx.root).as_posix() if ctx.build_context != ctx.root else ""
         in_context = [f for f in markers if (ctx_rel == "" or f.startswith(ctx_rel + "/") or f == ctx_rel)]

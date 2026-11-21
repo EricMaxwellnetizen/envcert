@@ -32,7 +32,9 @@ def test_check_safe_example_exit_0():
 def test_check_vulnerable_example_exit_1():
     r = run_cli("check", "examples/intentionally-vulnerable-environment")
     assert r.returncode == 1
-    for cid in ("EC010", "EC011", "EC052"):
+    # EC010 additionally fires when the untrackable .git/ fixture files are
+    # present locally (see examples/intentionally-vulnerable-environment/README.md)
+    for cid in ("EC011", "EC052"):
         assert cid in r.stdout
 
 

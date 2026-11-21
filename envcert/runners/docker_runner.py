@@ -37,7 +37,7 @@ class DockerRunner(Runner):
                 return RunnerInfo(self.name, False, f"docker daemon unavailable: {(proc.stderr or proc.stdout).strip()[:200]}",
                                   "docker (shared-kernel container); not used")
             return RunnerInfo(self.name, True, f"docker daemon {proc.stdout.strip()}",
-                              "docker container: cap-drop ALL, no-new-privileges, resource limits, no docker.sock mount; shared host kernel — not a VM")
+                              "docker container: cap-drop ALL, no-new-privileges, resource limits, no docker.sock mount, harness runs as root inside the disposable container to create /logs and /tests (as Harbor does); shared host kernel — not a VM")
         except Exception as exc:  # noqa: BLE001
             return RunnerInfo(self.name, False, f"docker probe failed: {exc}", "docker; not used")
 
@@ -48,7 +48,7 @@ class DockerRunner(Runner):
         info = self.info()
         if not info.available:
             return RunResult(ok=False, error=info.reason)
-        root = Path(task_root)
+        root = Path(task_root).resolve()
         dockerfile = root / "environment" / "Dockerfile"
         if not dockerfile.is_file():
             return RunResult(ok=False, error="no environment/Dockerfile to build")
@@ -62,12 +62,13 @@ class DockerRunner(Runner):
                 return RunResult(ok=False, error="docker build failed", stderr=(build.stderr or "")[-MAX_OUTPUT:],
                                  duration_sec=round(time.time() - start, 3))
             script = (
-                "mkdir -p /tmp/envcert-task /logs/verifier && cp -a /envcert-task/. /tmp/envcert-task/ 2>/dev/null || true; "
+                "mkdir -p /tmp/envcert-task /logs/verifier /tests && cp -a /envcert-task/. /tmp/envcert-task/ && "
+                "find /tmp/envcert-task -name '*.sh' -type f -exec sed -i 's/\\r$//' {} +; "
                 "if [ -f /tmp/envcert-task/solution/solve.sh ]; then bash /tmp/envcert-task/solution/solve.sh; fi; "
-                "cp -a /tmp/envcert-task/tests /tests 2>/dev/null || true; "
+                "cp -a /tmp/envcert-task/tests/. /tests/; "
                 "bash /tests/test.sh; cat /logs/verifier/reward.txt 2>/dev/null || cat /logs/verifier/reward.json 2>/dev/null || echo NO_REWARD"
             )
-            run = _run([exe, "run", "--rm", "--network", network, "--cap-drop", "ALL",
+            run = _run([exe, "run", "--rm", "--user", "root", "--network", network, "--cap-drop", "ALL",
                         "--security-opt", "no-new-privileges", "--memory", "2g", "--cpus", "2",
                         "--pids-limit", "256", "-v", f"{root}:/envcert-task:ro", tag,
                         "bash", "-lc", script], timeout)

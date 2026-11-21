@@ -79,5 +79,6 @@ def test_docker_runner_unavailable_is_graceful(monkeypatch):
     # On hosts without a daemon this must report unavailable, never raise.
     assert isinstance(info.available, bool)
     if not info.available:
-        result = DockerRunner().run_harbor_task(ROOT / "examples" / "safe-environment")
+        # also with a relative path (volume mounts need a resolved absolute path)
+        result = DockerRunner().run_harbor_task(pathlib.Path("examples/safe-environment"))
         assert not result.ok and result.error

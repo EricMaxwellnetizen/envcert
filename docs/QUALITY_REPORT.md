@@ -70,11 +70,13 @@ THREAT_MODEL.md; static mode never builds.
 
 ## Known bugs / limitations
 
-1. Docker dynamic path not end-to-end verified on a live daemon in this
-   environment (daemon down). Mitigation: graceful degradation tested;
-   needs a run on a Docker-enabled host before 0.1.0 is tagged. (GitHub CI
-   itself is green: run 44949955463 passed all 9 OS/Python jobs plus the
-   package build/install smoke test on 2026-11-22.)
+1. ~~Docker dynamic path not end-to-end verified~~ — verified live on
+   2026-11-22 (Docker Desktop 29.7.2): gold Docker run of the safe example
+   captures reward 1.0 and EC060 PASSes. This found and fixed three runner
+   bugs: relative-path volume mounts, harness needing root inside the
+   disposable container to create /logs + /tests, and CRLF shell scripts
+   (normalised in the copied workdir). GitHub CI is also green (run
+   44949955463: all 9 OS/Python jobs + package smoke test).
 2. `.dockerignore` matching is a conservative simplification of Docker's
    semantics; affected findings state this.
 3. Example Dockerfiles use a placeholder base-image digest (documented

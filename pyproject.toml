@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+# hatchling >=1.28 emits Metadata-Version 2.5, which PyPI's upload toolchain
+# still rejects; cap it until PyPI accepts 2.5.
+requires = ["hatchling>=1.25,<1.28"]
 build-backend = "hatchling.build"
 
 [project]

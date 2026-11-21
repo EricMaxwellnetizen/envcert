@@ -67,6 +67,17 @@ def load(root: Path) -> TaskContext:
         ctx.tests_dir = root / "tests"
     if (root / "solution").is_dir():
         ctx.solution_dir = root / "solution"
+    steps_dir = root / "steps"
+    if steps_dir.is_dir():
+        for step in sorted(p for p in steps_dir.iterdir() if p.is_dir()):
+            rel = f"steps/{step.name}"
+            ctx.steps.append({
+                "name": step.name,
+                "instruction": f"{rel}/instruction.md" if (step / "instruction.md").is_file() else None,
+                "tests": f"{rel}/tests" if (step / "tests").is_dir() else None,
+                "test_entrypoints": [f"{rel}/tests/{n}" for n in ("test.sh", "test.bat", "verifier.py") if (step / "tests" / n).is_file()],
+                "solution": f"{rel}/solution" if (step / "solution").is_dir() else None,
+            })
     env_dir = root / "environment"
     if env_dir.is_dir():
         ctx.environment_dir = env_dir

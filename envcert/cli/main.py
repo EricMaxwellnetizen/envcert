@@ -8,9 +8,12 @@ from pathlib import Path
 from envcert import __version__
 from envcert.attestations.intoto import (
     build_statement,
+    cosign_attest_image,
     cosign_available,
+    cosign_verify_attestation,
     dsse_envelope_unsigned,
     sign_with_cosign,
+    verify_statement_local,
 )
 from envcert.checks.base import REGISTRY
 from envcert.core.config import PROFILES, load_settings
@@ -59,6 +62,9 @@ def cmd_check(args) -> int:
         "fail_on": [s.strip() for s in args.fail_on.split(",")] if args.fail_on else None,
         "execution": args.execution, "enable": args.enable, "disable": args.disable,
         "repetitions": args.repetitions, "mutation": args.mutation,
+        "image": getattr(args, "image", None), "image_digest": getattr(args, "image_digest", None),
+        "runner_command": getattr(args, "runner_command", None),
+        "external_tools": getattr(args, "external_tools", False),
     })
     report = run_checks(task, settings, adapter_name=args.adapter)
     fmt = args.format
@@ -154,6 +160,16 @@ def cmd_attest(args) -> int:
     out_path = Path(args.output)
     out_path.write_text(json.dumps(out_obj, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {'DSSE envelope (UNSIGNED)' if args.dsse else 'in-toto statement (unsigned)'} to {out_path}")
+    if getattr(args, "image", None):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
+            json.dump(statement["predicate"], tf)
+            predicate_path = Path(tf.name)
+        ok, msg = cosign_attest_image(predicate_path, args.image, args.key)
+        print(msg)
+        if not ok and cosign_available():
+            return EXIT_ERROR
     print(f"predicateType: {statement['predicateType']}  result: {statement['predicate']['result']}")
     if args.sign:
         ok, msg = sign_with_cosign(out_path, args.key)
@@ -163,6 +179,42 @@ def cmd_attest(args) -> int:
     else:
         print("signing: not performed. To sign: install cosign and re-run with --sign [--key cosign.key], "
               "or use `cosign sign-blob`. An unsigned attestation is NOT cryptographic evidence.")
+    return EXIT_OK
+
+
+def cmd_verify_attestation(args) -> int:
+    path = Path(args.attestation)
+    if not path.is_file():
+        print(f"error: attestation not found: {path}", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"error: attestation is not valid JSON: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    statement = obj
+    if obj.get("payload") and obj.get("payloadType", "").startswith("application/vnd.in-toto"):
+        import base64
+
+        try:
+            statement = json.loads(base64.b64decode(obj["payload"]))
+        except Exception as exc:
+            print(f"error: cannot decode DSSE payload: {exc}", file=sys.stderr)
+            return EXIT_INVALID
+        if not obj.get("signatures"):
+            print("note: DSSE envelope carries no signatures; only structural verification is possible locally")
+    problems = verify_statement_local(statement)
+    if problems:
+        print("attestation structural verification FAILED:")
+        for pr in problems:
+            print(f"  - {pr}")
+        return EXIT_POLICY
+    print(f"attestation structure OK: predicateType={statement.get('predicateType')}, result={statement['predicate'].get('result')}, subjects={len(statement.get('subject') or [])}")
+    if args.image:
+        ok, msg = cosign_verify_attestation(args.image, args.key, args.policy)
+        print(msg)
+        return EXIT_OK if ok else EXIT_POLICY
+    print("note: no --image given, so no cryptographic verification was performed; structural OK is not a signature check")
     return EXIT_OK
 
 
@@ -206,12 +258,16 @@ def build_parser() -> argparse.ArgumentParser:
     pc = sub.add_parser("check", help="check a task directory")
     pc.add_argument("path", help="path to the task directory (e.g. ./my-task)")
     pc.add_argument("--profile", choices=sorted(PROFILES), default=None, help="validation profile (default: harbor, or from envcert.toml)")
-    pc.add_argument("--adapter", choices=["auto", "harbor", "generic"], default="auto")
+    pc.add_argument("--adapter", choices=["auto", "harbor", "generic", "nemo-gym", "inspect"], default="auto")
     pc.add_argument("--format", choices=["text", "json", "sarif"], default="text")
     pc.add_argument("--output", "-o", default=None, help="write report to this file (text summary still goes to stderr)")
     pc.add_argument("--config", default=None, help="path to envcert.toml (default: <task>/envcert.toml if present)")
-    pc.add_argument("--execution", choices=["none", "docker", "local-python"], default=None,
-                    help="dynamic execution mode (default: none = static only). docker = restricted container run; local-python = trusted pytest tasks only, NO sandbox")
+    pc.add_argument("--execution", choices=["none", "docker", "local-python", "external"], default=None,
+                    help="dynamic execution mode (default: none = static only). docker = restricted container run; local-python = trusted pytest tasks only, NO sandbox; external = operator's disposable-VM runner command (see --runner-command)")
+    pc.add_argument("--runner-command", default=None, help="external runner executable implementing EnvCert's runner protocol (execution=external)")
+    pc.add_argument("--image", default=None, help="OCI image reference whose digest should be bound into the report (resolved via docker inspect, or use name@sha256:...)")
+    pc.add_argument("--image-digest", default=None, help="explicit sha256:<64 hex> image digest to bind into the report/attestation")
+    pc.add_argument("--external-tools", action="store_true", help="also run installed companion tools (hadolint/trivy/semgrep) as EC070-EC072")
     pc.add_argument("--fail-on", default=None, help="comma-separated severities that fail policy, e.g. critical,high")
     pc.add_argument("--enable", action="append", default=None, help="only run this check ID (repeatable)")
     pc.add_argument("--disable", action="append", default=None, help="skip this check ID (repeatable)")
@@ -230,8 +286,16 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--output", "-o", default="attestation.json")
     pa.add_argument("--dsse", action="store_true", help="wrap the statement in a DSSE envelope (unsigned unless --sign succeeds)")
     pa.add_argument("--sign", action="store_true", help="sign with cosign sign-blob if cosign is installed")
+    pa.add_argument("--image", default=None, help="also attach the attestation to this OCI image (name@sha256:<digest>) via cosign attest; requires cosign")
     pa.add_argument("--key", default=None, help="cosign private key path")
     pa.set_defaults(fn=cmd_attest)
+
+    pva = sub.add_parser("verify-attestation", help="verify an in-toto attestation: structural checks locally, plus cosign verify-attestation with --image")
+    pva.add_argument("attestation")
+    pva.add_argument("--image", default=None, help="OCI image reference to verify the attestation against with cosign")
+    pva.add_argument("--key", default=None, help="cosign public key (omit for keyless with permissive identity regexp)")
+    pva.add_argument("--policy", default=None, help="CUE/Rego policy file passed to cosign verify-attestation")
+    pva.set_defaults(fn=cmd_verify_attestation)
 
     pi = sub.add_parser("init", help="write a starter envcert.toml")
     pi.add_argument("path", nargs="?", default=".")
@@ -263,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
 
 # ensure checks are registered even when CLI imported without engine
 import envcert.checks.dynamic_checks  # noqa: E402,F401
+import envcert.checks.external_checks  # noqa: E402,F401
 import envcert.checks.static_checks  # noqa: E402,F401
 
 if __name__ == "__main__":

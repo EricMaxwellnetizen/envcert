@@ -12,6 +12,7 @@ class RunResult:
     reward: float | None = None
     error: str = ""
     duration_sec: float = 0.0
+    image_digest: str | None = None
 
 
 @dataclass

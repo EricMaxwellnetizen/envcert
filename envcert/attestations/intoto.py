@@ -36,6 +36,9 @@ def build_statement(report: dict[str, Any], report_bytes: bytes) -> dict[str, An
         subjects.append({"name": "verifier", "digest": {"sha256": env["verifier_digest_sha256"]}})
     if env.get("solution_digest_sha256"):
         subjects.append({"name": "reference-solution", "digest": {"sha256": env["solution_digest_sha256"]}})
+    if env.get("image_digest"):
+        digest = str(env["image_digest"]).removeprefix("sha256:")
+        subjects.append({"name": env.get("image_reference") or "oci-image", "digest": {"sha256": digest}})
     failing = [f for f in report.get("findings", []) if f.get("status") in ("FAIL", "WARN")]
     predicate: dict[str, Any] = {
         "result": "PASSED" if policy.get("passed") else "FAILED",
@@ -72,6 +75,62 @@ def dsse_envelope_unsigned(statement: dict[str, Any]) -> dict[str, Any]:
 
 def cosign_available() -> str | None:
     return shutil.which("cosign")
+
+
+def cosign_attest_image(predicate_path: Path, image: str, key_path: str | None = None) -> tuple[bool, str]:
+    """Attach the statement as an OCI attestation on `image` via cosign attest.
+
+    The predicate file must contain the in-toto *predicate* (this module's
+    caller extracts it).  `image` should be referenced by digest
+    (name@sha256:...) so the attestation binds to immutable content.
+    """
+    if "@sha256:" not in image:
+        return False, f"refusing to attest a mutable image reference {image!r}: use name@sha256:<digest> so the attestation binds to immutable content"
+    exe = cosign_available()
+    if not exe:
+        return False, "cosign not found on PATH; OCI attestation not performed (statement file was still written)"
+    cmd = [exe, "attest", "--yes", "--predicate", str(predicate_path),
+           "--type", TEST_RESULT_PREDICATE, image]
+    if key_path:
+        cmd[2:2] = ["--key", key_path]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        return False, f"cosign attest failed: {(proc.stderr or proc.stdout)[:500]}"
+    return True, f"cosign attestation attached to {image} (predicate type {TEST_RESULT_PREDICATE})"
+
+
+def cosign_verify_attestation(image: str, key_path: str | None = None, policy: str | None = None) -> tuple[bool, str]:
+    exe = cosign_available()
+    if not exe:
+        return False, "cosign not found on PATH; cryptographic verification not performed"
+    cmd = [exe, "verify-attestation", "--type", TEST_RESULT_PREDICATE]
+    if key_path:
+        cmd += ["--key", key_path]
+    else:
+        cmd += ["--certificate-identity-regexp", ".*", "--certificate-oidc-issuer-regexp", ".*"]
+    if policy:
+        cmd += ["--policy", policy]
+    cmd.append(image)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        return False, f"cosign verify-attestation failed: {(proc.stderr or proc.stdout)[:500]}"
+    return True, f"cosign verify-attestation passed for {image}"
+
+
+def verify_statement_local(statement: dict[str, Any]) -> list[str]:
+    """Structural verification only (no cryptography): type, subjects, result."""
+    problems = []
+    if statement.get("_type") != STATEMENT_TYPE:
+        problems.append(f"unexpected _type: {statement.get('_type')!r}")
+    if statement.get("predicateType") != TEST_RESULT_PREDICATE:
+        problems.append(f"unexpected predicateType: {statement.get('predicateType')!r}")
+    subjects = statement.get("subject") or []
+    if not subjects or not all((s.get("digest") or {}).get("sha256") for s in subjects):
+        problems.append("statement has no sha256-bound subjects")
+    predicate = statement.get("predicate") or {}
+    if predicate.get("result") not in ("PASSED", "FAILED"):
+        problems.append("predicate.result is not PASSED/FAILED")
+    return problems
 
 
 def sign_with_cosign(envelope_path: Path, key_path: str | None = None) -> tuple[bool, str]:

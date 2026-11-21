@@ -23,6 +23,13 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Remediation: Add solution/solve.sh (Harbor) or document why no reference solution exists.
 - Limitations: Some frameworks source solutions externally; then this is informational.
 
+## EC004 - Multi-step tasks: every step is complete (instruction, verifier, solution)
+
+- Category: structure  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Each Harbor step should carry its own instruction and verifier (or inherit the documented fallback), so every step is actually graded.
+- Remediation: Add steps/<name>/instruction.md and steps/<name>/tests/test.sh (or document the fallback), plus a per-step solution where applicable.
+- Limitations: Step-level environment sharing follows Harbor's multi-step rules; this checks presence, not per-step semantics.
+
 ## EC010 - No exposed version-control metadata in agent-visible paths
 
 - Category: leakage  |  Default severity on failure: HIGH  |  Dynamic: False
@@ -197,3 +204,31 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Description: Mutated variants of a correct Python solution should be rejected; the rejection rate is a verifier-strength signal.
 - Remediation: Add assertions covering the mutated behaviour; do not treat the rate as proof of correctness.
 - Limitations: Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest tasks only.
+
+## EC064 - Shell-solution mutation: verifier rejects mutated reference solutions (docker)
+
+- Category: mutation  |  Default severity on failure: MEDIUM  |  Dynamic: True
+- Description: Mutating literal outputs in solution/solve.sh should make the verifier reject the run; surviving mutants signal a weak verifier.
+- Remediation: Strengthen verifier assertions on the mutated outputs.
+- Limitations: Docker execution only; only literal-bearing shell solutions can be mutated. Mutant validity is heuristic.
+
+## EC070 - Hadolint Dockerfile lint (external companion)
+
+- Category: external  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Runs hadolint on the task Dockerfile when installed and --external-tools is given.
+- Remediation: Fix the hadolint findings or document suppressions in a .hadolint.yaml.
+- Limitations: External tool output is mapped, not re-derived; the tool's own version and ruleset determine coverage.
+
+## EC071 - Trivy filesystem vulnerability scan (external companion)
+
+- Category: external  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Runs `trivy fs` (vuln+secret scanners) on the task directory when installed and --external-tools is given. May need network for its DB on first run.
+- Remediation: Update or replace flagged dependencies/images; do not treat a clean EnvCert static run as a CVE verdict.
+- Limitations: External tool output is mapped, not re-derived; the tool's own version and ruleset determine coverage.
+
+## EC072 - Semgrep scan (external companion, task-provided rules only)
+
+- Category: external  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Runs semgrep only when the task ships a .semgrep.yml/.semgrep.yaml config, so rule choice stays with the task owner.
+- Remediation: Address semgrep findings or curate the task's semgrep config.
+- Limitations: External tool output is mapped, not re-derived; the tool's own version and ruleset determine coverage.

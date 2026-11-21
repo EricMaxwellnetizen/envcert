@@ -41,8 +41,14 @@ class DockerRunner(Runner):
         except Exception as exc:  # noqa: BLE001
             return RunnerInfo(self.name, False, f"docker probe failed: {exc}", "docker; not used")
 
-    def run_harbor_task(self, task_root, timeout: int = 600, network: str = "none") -> RunResult:
-        """Build environment/, run solution/solve.sh then tests/test.sh, read reward."""
+    def run_harbor_task(self, task_root, timeout: int = 600, network: str = "none",
+                        variant: str = "gold") -> RunResult:
+        """Build environment/, run solution (gold only) then tests/test.sh, read reward.
+
+        variant="noop" skips the reference solution entirely — the negative
+        control: whatever the untouched environment scores is what a
+        do-nothing agent would get.
+        """
         from pathlib import Path
 
         info = self.info()
@@ -61,10 +67,19 @@ class DockerRunner(Runner):
             if build.returncode != 0:
                 return RunResult(ok=False, error="docker build failed", stderr=(build.stderr or "")[-MAX_OUTPUT:],
                                  duration_sec=round(time.time() - start, 3))
+            image_digest = None
+            try:
+                insp = _run([exe, "image", "inspect", "--format", "{{.Id}}", tag], 30)
+                if insp.returncode == 0 and insp.stdout.strip().startswith("sha256:"):
+                    image_digest = insp.stdout.strip()
+            except Exception:  # noqa: BLE001
+                image_digest = None
+            solve_step = ("if [ -f /tmp/envcert-task/solution/solve.sh ]; then bash /tmp/envcert-task/solution/solve.sh; fi; "
+                          if variant == "gold" else "echo 'envcert: no-op variant (solution skipped)'; ")
             script = (
                 "mkdir -p /tmp/envcert-task /logs/verifier /tests && cp -a /envcert-task/. /tmp/envcert-task/ && "
                 "find /tmp/envcert-task -name '*.sh' -type f -exec sed -i 's/\\r$//' {} +; "
-                "if [ -f /tmp/envcert-task/solution/solve.sh ]; then bash /tmp/envcert-task/solution/solve.sh; fi; "
+                + solve_step +
                 "cp -a /tmp/envcert-task/tests/. /tests/; "
                 "bash /tests/test.sh; cat /logs/verifier/reward.txt 2>/dev/null || cat /logs/verifier/reward.json 2>/dev/null || echo NO_REWARD"
             )
@@ -82,7 +97,7 @@ class DockerRunner(Runner):
                     continue
             return RunResult(ok=run.returncode == 0, exit_code=run.returncode, stdout=out,
                              stderr=(run.stderr or "")[-MAX_OUTPUT:], reward=reward,
-                             duration_sec=round(time.time() - start, 3))
+                             duration_sec=round(time.time() - start, 3), image_digest=image_digest)
         except subprocess.TimeoutExpired:
             return RunResult(ok=False, error=f"docker execution timed out after {timeout}s",
                              duration_sec=float(timeout))

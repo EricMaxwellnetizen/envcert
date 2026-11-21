@@ -146,9 +146,9 @@ TOOL_NAMES = {"pytest", "pytest.exe", "python", "python3", "python.exe", "pip", 
 
 
 def _verifier_files(ctx) -> list[str]:
-    out: list = []
+    out: list = list(getattr(ctx, "verifier_paths", []) or [])
     for f in ctx.files:
-        if f.startswith("tests/") or "/tests/" in f:
+        if (f.startswith("tests/") or "/tests/" in f) and f not in out:
             out.append(f)
     return out
 
@@ -162,14 +162,54 @@ def _verifier_texts(ctx):
 
 # ---------------------------------------------------------------- checks
 
+EC004 = CheckInfo("EC004", "Multi-step tasks: every step is complete (instruction, verifier, solution)", "structure", Severity.MEDIUM,
+                  "Each Harbor step should carry its own instruction and verifier (or inherit the documented fallback), so every step is actually graded.",
+                  "Add steps/<name>/instruction.md and steps/<name>/tests/test.sh (or document the fallback), plus a per-step solution where applicable.",
+                  "Step-level environment sharing follows Harbor's multi-step rules; this checks presence, not per-step semantics.")
+
+
+@check(EC004)
+def check_multistep(c: CheckContext) -> list:
+    ctx = c.task
+    if ctx.adapter != "harbor" or not ctx.steps:
+        return [not_applicable(EC004, "Not a multi-step Harbor task (no steps/ directory).")]
+    problems = []
+    for step in ctx.steps:
+        if not step.get("instruction"):
+            problems.append(f"step '{step['name']}': missing instruction.md")
+        if not step.get("test_entrypoints"):
+            problems.append(f"step '{step['name']}': no tests/test.sh|test.bat|verifier.py" + (" (top-level tests/ fallback may apply)" if ctx.tests_dir else ""))
+    if problems:
+        return [finding(EC004, Status.WARN, "; ".join(problems), evidence={"steps": ctx.steps, "problems": problems}, confidence=Confidence.MEDIUM)]
+    return [passed(EC004, f"All {len(ctx.steps)} steps have instructions and verifier entrypoints.", evidence={"steps": [s["name"] for s in ctx.steps]})]
+
+
 @check(EC001)
 def check_structure(c: CheckContext) -> list:
     ctx = c.task
     missing = []
+    if ctx.adapter == "nemo-gym":
+        if not ctx.dataset_files and not ctx.config_path:
+            missing.append("dataset.toml or *.jsonl row files")
+        if not ctx.verifier_paths and not any(f.startswith("tests/") for f in ctx.files):
+            missing.append("verifier.py (dataset root) or per-task tests/")
+        if missing:
+            return [finding(EC001, Status.FAIL, f"Missing NeMo Gym dataset components: {', '.join(missing)}",
+                            evidence={"missing": missing, "adapter": ctx.adapter})]
+        return [passed(EC001, f"Recognised NeMo Gym dataset '{ctx.task_name}' (dataset files: {ctx.dataset_files}, verifier: {ctx.verifier_paths}).",
+                       evidence={"adapter": ctx.adapter, "dataset_files": ctx.dataset_files})]
+    if ctx.adapter == "inspect":
+        if not ctx.verifier_paths:
+            missing.append("a Python file defining @task with inspect_ai imports")
+        if missing:
+            return [finding(EC001, Status.FAIL, f"Missing Inspect components: {', '.join(missing)}",
+                            evidence={"missing": missing, "adapter": ctx.adapter})]
+        return [passed(EC001, f"Recognised Inspect evaluation '{ctx.task_name}' (task files: {', '.join(ctx.verifier_paths)}).",
+                       evidence={"adapter": ctx.adapter, "scorers": (ctx.config or {}).get("scorers")})]
     if ctx.adapter == "harbor":
         if not ctx.config_path:
             missing.append("task.toml")
-        if not ctx.instruction_path and not ctx.has("steps"):
+        if not ctx.instruction_path and not ctx.steps:
             missing.append("instruction.md")
         entries = harbor_adapter.verifier_entrypoints(ctx)
         if not entries:
@@ -192,7 +232,26 @@ def check_structure(c: CheckContext) -> list:
 @check(EC002)
 def check_instruction(c: CheckContext) -> list:
     ctx = c.task
+    if not ctx.instruction_path and ctx.steps:
+        issues = []
+        checked = 0
+        for step in ctx.steps:
+            rel = step.get("instruction")
+            if not rel:
+                issues.append(f"step '{step['name']}': missing instruction.md")
+                continue
+            checked += 1
+            text = ctx.text(rel) or ""
+            if len(text.strip()) < 40:
+                issues.append(f"step '{step['name']}': instruction shorter than 40 characters")
+            if re.search(r"(?i)\b(TODO|TBD|Lorem ipsum|placeholder)\b", text):
+                issues.append(f"step '{step['name']}': instruction contains placeholder text")
+        if issues:
+            return [finding(EC002, Status.WARN, "; ".join(issues), evidence={"issues": issues, "steps_checked": checked})]
+        return [passed(EC002, f"Per-step instructions present and non-trivial for {checked} step(s); no top-level instruction.md (multi-step task).", evidence={"steps_checked": checked})]
     if not ctx.instruction_path:
+        if ctx.adapter in ("nemo-gym", "inspect"):
+            return [not_applicable(EC002, f"{ctx.adapter} tasks carry prompts in dataset rows / Sample inputs, not instruction.md; prompt content is covered by EC014's dataset handling.")]
         return [not_applicable(EC002, "No top-level instruction.md (multi-step or generic layout); per-step instructions not audited.")]
     text = ctx.text("instruction.md") or ""
     issues = []
@@ -361,16 +420,35 @@ def check_secrets(c: CheckContext) -> list:
 @check(EC014)
 def check_instruction_leak(c: CheckContext) -> list:
     ctx = c.task
+    if ctx.adapter == "nemo-gym" and ctx.dataset_files:
+        import json as _json
+
+        leaks = []
+        for rel in ctx.dataset_files:
+            text = ctx.text(rel) or ""
+            for lineno, line in enumerate(text.splitlines(), 1):
+                try:
+                    row = _json.loads(line)
+                except ValueError:
+                    continue
+                expected = row.get("expected_answer") or row.get("answer") or row.get("target")
+                prompt = _json.dumps(row.get("responses_create_params") or row.get("input") or "")
+                if isinstance(expected, str) and len(expected) >= 3 and expected in prompt:
+                    leaks.append({"dataset": rel, "line": lineno, "expected_answer_in_prompt": expected[:60]})
+        if leaks:
+            return [finding(EC014, Status.WARN, "Dataset row(s) embed the expected answer inside the agent-visible prompt (responses_create_params/input); the agent can read its own ground truth.",
+                            evidence={"leaks": leaks[:10]}, confidence=Confidence.MEDIUM)]
+        return [passed(EC014, "No expected_answer/target values found inside agent-visible prompt fields of dataset rows.", evidence={"dataset_files": ctx.dataset_files})]
     if not ctx.instruction_path:
         return [not_applicable(EC014, "No instruction.md to compare against the solution.")]
     instr = ctx.text("instruction.md") or ""
     sol_files = [f for f in ctx.files if f.startswith("solution/") or "/solution/" in f]
     leaked = []
     for f in sol_files:
-        text = ctx.text(f)
-        if not text:
+        sol_text = ctx.text(f)
+        if not sol_text:
             continue
-        for raw in text.splitlines():
+        for raw in sol_text.splitlines():
             line = raw.strip()
             if len(line) >= 40 and line in instr and not line.startswith("#"):
                 leaked.append({"solution_file": f, "line": line[:120]})
@@ -655,8 +733,8 @@ def check_verifier_exists(c: CheckContext) -> list:
     ctx = c.task
     entries = harbor_adapter.verifier_entrypoints(ctx) if ctx.adapter == "harbor" else _verifier_files(ctx)[:5]
     if not entries:
-        return [finding(EC050, Status.FAIL, "No verifier entrypoint found (expected tests/test.sh, test.bat or verifier.py).",
-                        severity=Severity.CRITICAL, evidence={"searched": "tests/"})]
+        return [finding(EC050, Status.FAIL, "No verifier/scorer entrypoint found (Harbor: tests/test.sh|test.bat|verifier.py; NeMo Gym: verifier.py; Inspect: @task file with scorer=).",
+                        severity=Severity.CRITICAL, evidence={"searched": "tests/, verifier.py, @task files"})]
     empty = [e for e in entries if not (ctx.text(e) or "").strip()]
     substantive = [e for e in entries if e not in empty]
     if empty and not substantive:
@@ -668,6 +746,22 @@ def check_verifier_exists(c: CheckContext) -> list:
 @check(EC051)
 def check_reward_production(c: CheckContext) -> list:
     ctx = c.task
+    if ctx.adapter == "nemo-gym":
+        for rel in ctx.verifier_paths:
+            text = ctx.text(rel) or ""
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                continue
+            funcs = [n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            if "verify" in funcs:
+                return [passed(EC051, f"NeMo Gym Python verifier '{rel}' defines verify(), which returns the reward directly (no reward file needed).", evidence={"verifier": rel})]
+        return [finding(EC051, Status.FAIL, "No verify() function found in the NeMo Gym verifier; Gym will score rows 0 / mask them.", severity=Severity.HIGH, evidence={"verifier_paths": ctx.verifier_paths})]
+    if ctx.adapter == "inspect":
+        scorers = (ctx.config or {}).get("scorers") or []
+        if scorers:
+            return [passed(EC051, f"Inspect scorer(s) declared ({', '.join(scorers)}); scorers return Score values directly, no reward file applies.", evidence={"scorers": scorers})]
+        return [finding(EC051, Status.WARN, "No scorer= detected in the Inspect @task file; scoring may be implicit or missing.", severity=Severity.MEDIUM, evidence={"task_files": ctx.verifier_paths})]
     if ctx.adapter != "harbor":
         return [not_applicable(EC051, "Reward-file contract is Harbor-specific (/logs/verifier/reward.txt|json).")]
     entries = harbor_adapter.verifier_entrypoints(ctx)
@@ -787,7 +881,7 @@ def check_self_reported_reward(c: CheckContext) -> list:
 
 def register_all() -> list[CheckInfo]:
     return [REGISTRY[i][0] for i in
-            ["EC001", "EC002", "EC003", "EC010", "EC011", "EC012", "EC013", "EC014", "EC020", "EC021", "EC022",
+            ["EC001", "EC002", "EC003", "EC004", "EC010", "EC011", "EC012", "EC013", "EC014", "EC020", "EC021", "EC022",
              "EC023", "EC024", "EC030", "EC031", "EC032", "EC033", "EC040", "EC041", "EC050", "EC051", "EC052",
              "EC053", "EC054"]]
 

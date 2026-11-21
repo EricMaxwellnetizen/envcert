@@ -15,7 +15,7 @@
       "properties": {
         "task_name": {"type": "string"},
         "task_path": {"type": "string"},
-        "adapter": {"type": "string", "enum": ["harbor", "generic"]},
+        "adapter": {"type": "string", "enum": ["harbor", "generic", "nemo-gym", "inspect"]},
         "bundle_digest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "file_count": {"type": "integer", "minimum": 0},
         "verifier_digest_sha256": {"type": ["string", "null"]},

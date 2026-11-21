@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from envcert.adapters.base import TaskContext
 from envcert.core.models import Confidence, Finding, Severity, Status
@@ -22,10 +22,13 @@ class CheckInfo:
 @dataclass
 class CheckContext:
     task: TaskContext
-    execution: str = "none"  # none | docker | local-python
+    execution: str = "none"  # none | docker | local-python | external
     repetitions: int = 3
     enable_mutation: bool = False
     max_mutants: int = 10
+    external_tools: bool = False
+    runner_command: str = ""
+    shared: dict = field(default_factory=dict)  # checks stash run artefacts (e.g. image digest) for the report
 
 
 CheckFn = Callable[[CheckContext], list[Finding]]

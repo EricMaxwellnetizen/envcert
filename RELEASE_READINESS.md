@@ -1,18 +1,19 @@
-# Release readiness — EnvCert 0.1.0
+# Release readiness — EnvCert 0.2.0
 
 Status as of 2026-11-22: **release candidate in a private GitHub repository; not published.**
 The private repo https://github.com/EricMaxwellnetizen/envcert was created and the code pushed on 2026-11-22. No version tag, GitHub release or PyPI upload has been performed.
 
 | Item | Status |
 |---|---|
-| Current version | 0.1.0 (`envcert/__init__.py`, pyproject) |
+| Current version | 0.2.0 (`envcert/__init__.py`, pyproject); 0.1.0 previously published (public repo, tag, GitHub release, PyPI via Trusted Publishing) |
+| 0.2.0 features | NeMo Gym + Inspect adapters, EC004 multi-step, Docker EC061/EC062/EC064, OCI image digests + Cosign OCI attestation/verify-attestation, external (VM) runner protocol, companion tools EC070–EC072, richer mutation operators — all fixture-tested; Docker + Hadolint paths verified live (Docker 29.7.2, Hadolint 2.12.0) |
 | Installation method | `pip install .` from this repo now; `pip install envcert` after PyPI publication |
 | Package build | ✅ `python -m build` succeeds; wheel+sdist in `dist/`; wheel verified in a clean venv (CLI runs, schema ships in the wheel) |
 | Package name | `envcert` returned 404 from the PyPI JSON API on 2026-11-22 (appears available; re-check at upload time — names can be taken meanwhile) |
 | Supported platforms | Python 3.11–3.13; developed/tested on Windows + CPython 3.12. CI matrix covers ubuntu/windows/macos × 3.11/3.12/3.13 (`.github/workflows/ci.yml`, not yet run on GitHub) |
-| Supported environment formats | Harbor task directories (implemented, fixture-tested); generic Docker bundles (heuristic). NeMo Gym/Inspect: not implemented |
-| Implemented checks | 28: EC001–EC054 static (24), EC060–EC062 dynamic, EC063 mutation (`envcert list-checks`) |
-| Deferred checks/features | Docker negative controls, OCI image digest subject, Cosign `attest` to a registry, multi-step per-step auditing, NeMo/Inspect adapters (docs/architecture/ROADMAP.md) |
+| Supported environment formats | Harbor (incl. multi-step), generic Docker, NeMo Gym datasets, Inspect AI evaluations — all implemented and fixture-tested |
+| Implemented checks | 33: EC001–EC054 + EC004 static, EC060–EC062 dynamic, EC063–EC064 mutation, EC070–EC072 external companions (`envcert list-checks`) |
+| Deferred checks/features | NeMo Resources-Server live HTTP probing, Inspect dynamic runs, coverage-based equivalent-mutant reduction (docs/architecture/ROADMAP.md "Next") |
 | GitHub Action | `action.yml` (composite) + examples prepared; **not exercised on GitHub** from this workspace |
 | Attestation status | in-toto Test Result generation + DSSE envelope implemented and unit-tested; Cosign signing is optional and untested here (cosign not installed); unsigned output is labelled as such |
 | Tests / lint / types | 66 passed, 1 skipped (Windows symlink privilege); coverage 80%; ruff clean; mypy clean — see docs/QUALITY_REPORT.md |

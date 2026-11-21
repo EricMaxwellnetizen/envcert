@@ -24,6 +24,10 @@ EC062 = CheckInfo("EC062", "Verifier outcome is repeatable across repetitions", 
                   "Re-running gold verification should give a consistent reward/exit outcome.",
                   "Remove nondeterminism (time, randomness, network, ordering) from the task or verifier.",
                   "Compares reward/exit outcome, not bitwise-identical stdout.", dynamic=True)
+EC064 = CheckInfo("EC064", "Shell-solution mutation: verifier rejects mutated reference solutions (docker)", "mutation", Severity.MEDIUM,
+                  "Mutating literal outputs in solution/solve.sh should make the verifier reject the run; surviving mutants signal a weak verifier.",
+                  "Strengthen verifier assertions on the mutated outputs.",
+                  "Docker execution only; only literal-bearing shell solutions can be mutated. Mutant validity is heuristic.", dynamic=True)
 EC063 = CheckInfo("EC063", "Mutation testing: verifier rejects mutated (incorrect) solutions", "mutation", Severity.MEDIUM,
                   "Mutated variants of a correct Python solution should be rejected; the rejection rate is a verifier-strength signal.",
                   "Add assertions covering the mutated behaviour; do not treat the rate as proof of correctness.",
@@ -39,9 +43,17 @@ def _is_python_task(ctx) -> bool:
 def _run_variant(c: CheckContext, variant: str):
     ctx = c.task
     if c.execution == "docker":
-        if variant != "gold":
-            return None, "docker runner currently supports the gold run only; negative controls need per-task artifact manipulation"
-        return DockerRunner().run_harbor_task(ctx.root), None
+        result = DockerRunner().run_harbor_task(ctx.root, variant=variant)
+        if result.image_digest:
+            c.shared["image_digest"] = result.image_digest
+        return result, None
+    if c.execution == "external":
+        from envcert.runners.external_runner import ExternalRunner
+
+        result = ExternalRunner(c.runner_command).run_harbor_task(ctx.root, variant=variant)
+        if result.image_digest:
+            c.shared["image_digest"] = result.image_digest
+        return result, None
     if c.execution == "local-python":
         if not _is_python_task(ctx):
             return None, "local-python execution requires solution/*.py plus tests/test_*.py (pytest-style task)"
@@ -75,16 +87,17 @@ def check_gold(c: CheckContext) -> list:
 def check_negative_control(c: CheckContext) -> list:
     if c.execution == "none":
         return [not_run(EC061, "Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.")]
-    if c.execution == "docker":
-        return [not_applicable(EC061, "Docker negative controls are not automated in this version: a no-op's validity is task-specific and Harbor artifact transfer differs per task. Run the gold check and test a no-op manually, or use local-python for pytest tasks.")]
     result, why = _run_variant(c, "noop")
     if result is None:
         return [not_applicable(EC061, f"Negative control not supported here: {why}.")]
     if result.error and result.reward is None:
         return [finding(EC061, Status.ERROR, f"Negative-control execution failed to run: {result.error}", severity=Severity.INFO, evidence={"error": result.error})]
-    if result.ok or (result.reward is not None and result.reward >= 1.0):
+    # Reward, when present, is authoritative (a docker harness exits 0 even
+    # when the reward is 0); only fall back to exit status without a reward.
+    noop_passed = (result.reward >= 1.0) if result.reward is not None else result.ok
+    if noop_passed:
         return [finding(EC061, Status.WARN,
-                        "No-op (emptied) solution PASSED the verifier. If a no-op should not solve this task, the verifier is too weak; if no action is a legitimate solution, record that and ignore this warning.",
+                        "No-op (skipped/emptied) solution PASSED the verifier. If a no-op should not solve this task, the verifier is too weak; if no action is a legitimate solution, record that and ignore this warning.",
                         severity=Severity.HIGH, evidence={"reward": result.reward, "exit_code": result.exit_code, "variant": "noop"})]
     return [passed(EC061, "No-op negative control was rejected by the verifier (non-passing outcome).",
                    evidence={"reward": result.reward, "exit_code": result.exit_code, "variant": "noop"})]
@@ -94,8 +107,19 @@ def check_negative_control(c: CheckContext) -> list:
 def check_repeatability(c: CheckContext) -> list:
     if c.execution == "none":
         return [not_run(EC062, "Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.")]
+    if c.execution in ("docker", "external"):
+        outcomes = []
+        for _ in range(max(2, min(c.repetitions, 3))):
+            r, _why = _run_variant(c, "gold")
+            if r is None:
+                return [not_applicable(EC062, f"Repeatability not supported here: {_why}.")]
+            outcomes.append({"reward": r.reward, "exit_code": r.exit_code, "error": r.error})
+        rewards = {o["reward"] for o in outcomes}
+        if len(rewards) == 1 and None not in rewards:
+            return [passed(EC062, f"Gold reward was consistent across {len(outcomes)} {c.execution} runs (reward={outcomes[0]['reward']}).", evidence={"runs": outcomes})]
+        return [finding(EC062, Status.WARN, f"Gold outcome varied across {len(outcomes)} {c.execution} runs: {outcomes}. Investigate nondeterminism.", evidence={"runs": outcomes})]
     if c.execution != "local-python":
-        return [not_applicable(EC062, "Repeatability repetitions are currently automated for local-python tasks only; for docker, re-run EC060 manually with different seeds/times.")]
+        return [not_applicable(EC062, "Repeatability requires an execution mode.")]
     if not _is_python_task(c.task):
         return [not_applicable(EC062, "Repeatability requires a pytest-style Python task under local-python execution.")]
     runner = LocalPythonRunner()
@@ -130,3 +154,56 @@ def check_mutation(c: CheckContext) -> list:
                         evidence=ev)]
     return [passed(EC063, f"Mutation rejection rate {rate:.0%} ({report['rejected']}/{report['eligible']} incorrect variants rejected). This is a strength signal, not proof of verifier correctness.",
                    evidence=ev)]
+
+
+@check(EC064)
+def check_shell_mutation(c: CheckContext) -> list:
+    if not c.enable_mutation:
+        return [not_run(EC064, "Shell-solution mutation is opt-in: re-run with --mutation and --execution docker.")]
+    if c.execution != "docker":
+        return [not_applicable(EC064, "Shell-solution mutation in this version runs under --execution docker only.")]
+    if c.task.adapter != "harbor":
+        return [not_applicable(EC064, "Shell-solution mutation supports Harbor tasks with solution/solve.sh.")]
+    import re
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    solve_rel = "solution/solve.sh"
+    if not c.task.has(solve_rel):
+        return [not_applicable(EC064, "No solution/solve.sh to mutate.")]
+    original = c.task.text(solve_rel) or ""
+    mutants: list[tuple[str, str]] = []
+    for m in re.finditer(r"'([^']{3,})'|\"([^\"]{3,})\"", original):
+        val = m.group(1) or m.group(2)
+        mutants.append((f"string literal {val[:30]!r} mutated", original.replace(val, val + "-MUTATED", 1)))
+        if len(mutants) >= 3:
+            break
+    if not mutants:
+        for m in re.finditer(r"\b(\d+)\b", original):
+            mutants.append((f"number {m.group(1)} incremented", original[:m.start(1)] + str(int(m.group(1)) + 1) + original[m.end(1):]))
+            if len(mutants) >= 2:
+                break
+    if not mutants:
+        return [not_applicable(EC064, "solution/solve.sh contains no string/number literals to mutate.")]
+    runner = DockerRunner()
+    if not runner.info().available:
+        return [finding(EC064, Status.ERROR, f"Docker unavailable for shell mutation: {runner.info().reason}", severity=Severity.INFO, evidence={"runner": "docker"})]
+    gold = runner.run_harbor_task(c.task.root, variant="gold")
+    if gold.reward is not None and gold.reward < 1.0:
+        return [not_applicable(EC064, f"Gold run does not pass (reward={gold.reward}); mutation would be meaningless.")]
+    results = []
+    rejected = 0
+    for desc, mutated in mutants[: c.max_mutants]:
+        with tempfile.TemporaryDirectory(prefix="envcert-shellmut-") as td:
+            dest = Path(td) / "task"
+            shutil.copytree(c.task.root, dest, ignore=shutil.ignore_patterns(".git"))
+            (dest / solve_rel).write_text(mutated, encoding="utf-8")
+            r = runner.run_harbor_task(dest, variant="gold")
+        survived = r.reward is not None and r.reward >= 1.0
+        results.append({"change": desc, "reward": r.reward, "outcome": "survived" if survived else "rejected"})
+        rejected += 0 if survived else 1
+    rate = rejected / len(results) if results else None
+    if rate is not None and rate < 0.5:
+        return [finding(EC064, Status.WARN, f"Shell-solution mutation rejection rate is {rate:.0%} ({rejected}/{len(results)}); mutated (wrong) solutions still pass.", evidence={"mutants": results, "rejection_rate": rate})]
+    return [passed(EC064, f"Shell-solution mutation rejection rate {rate:.0%} ({rejected}/{len(results)}). A strength signal, not proof of verifier correctness.", evidence={"mutants": results, "rejection_rate": rate})]

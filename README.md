@@ -79,7 +79,7 @@ The intentionally vulnerable example produces (among others):
 
 ## What it checks
 
-28 checks with stable public IDs (full catalog:
+33 checks with stable public IDs (full catalog:
 `docs/architecture/CHECK_CATALOG.md`, or `envcert list-checks -v`):
 
 | Area | Checks | Examples |
@@ -90,8 +90,10 @@ The intentionally vulnerable example produces (among others):
 | Docker | EC030–EC033 | unpinned base images, root user, remote ADD / curl\|sh, undeclared network policy |
 | Dependencies | EC040–EC041 | unpinned pip deps, unverified downloads |
 | Verifier quality | EC050–EC054 | missing/empty verifier, no reward production, unconditional success, assertion-free tests, self-reported rewards |
-| Dynamic (opt-in) | EC060–EC062 | gold run, no-op negative control, repeatability |
-| Mutation (opt-in) | EC063 | AST mutants of a Python solution; rejection rate as a strength signal |
+| Multi-step | EC004 | per-step instruction/verifier completeness (plus per-step EC002) |
+| Dynamic (opt-in) | EC060–EC062 | gold run, no-op negative control (docker/local/external), repeatability |
+| Mutation (opt-in) | EC063–EC064 | AST mutants of a Python solution; literal mutants of shell solutions under Docker |
+| External companions (opt-in) | EC070–EC072 | Hadolint, Trivy, Semgrep — run only when installed and `--external-tools` is passed |
 
 Every finding carries evidence, a severity, a confidence, a remediation and
 stated limitations. Heuristics report WARN — EnvCert does not present a
@@ -142,9 +144,16 @@ input/config · `3` internal/execution error.
 
 | Format | Status |
 |---|---|
-| Harbor task directories (task.toml schema 1.x) | Implemented and fixture-tested |
+| Harbor task directories (task.toml schema 1.x, incl. multi-step `steps/`) | Implemented and fixture-tested |
 | Generic Docker task bundles (Dockerfile + tests/solution) | Implemented, reduced-confidence heuristics |
-| NeMo Gym JSONL/resources layouts, Inspect AI tasks | Not yet — roadmap, not promised (`docs/architecture/ROADMAP.md`) |
+| NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static; Resources-Server HTTP probing is roadmap) — `examples/nemo-gym-dataset` |
+| Inspect AI evaluations (@task Python files) | Implemented (static) — `examples/inspect-eval` |
+
+Dynamic execution modes: `docker` (restricted), `local-python` (trusted
+pytest tasks, no sandbox), `external` (your disposable-VM/remote runner via
+a documented JSON protocol). OCI image digests can be bound with
+`--image`/`--image-digest`; Cosign OCI attestation is available via
+`envcert attest --image name@sha256:...` and `envcert verify-attestation`.
 
 ## Configuration
 

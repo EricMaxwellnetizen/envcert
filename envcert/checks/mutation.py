@@ -21,11 +21,35 @@ ARITH = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mul
 CMP = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.Gt: ast.LtE, ast.LtE: ast.Gt, ast.GtE: ast.Lt}
 
 
+PRINT_ONLY = {"print", "logging.info", "logging.debug", "logger.info", "logger.debug"}
+
+
 class _Mutator(ast.NodeTransformer):
     def __init__(self, index: int):
         self.index = index
         self.count = -1
         self.applied = ""
+        self.possible_equivalent = False
+        self._print_depth = 0
+
+    def _mark(self, what: str, lineno: int):
+        self.applied = f"{what} (line {lineno})"
+        if self._print_depth:
+            self.possible_equivalent = True
+
+    def visit_Call(self, node):
+        is_print = False
+        try:
+            name = ast.unparse(node.func)
+            is_print = name in PRINT_ONLY or name.endswith(".debug") or name.endswith(".info")
+        except Exception:
+            pass
+        if is_print:
+            self._print_depth += 1
+            self.generic_visit(node)
+            self._print_depth -= 1
+            return node
+        return self.generic_visit(node) or node
 
     def _hit(self) -> bool:
         self.count += 1
@@ -34,32 +58,62 @@ class _Mutator(ast.NodeTransformer):
     def visit_BinOp(self, node):
         self.generic_visit(node)
         if type(node.op) in ARITH and self._hit():
-            self.applied = f"{type(node.op).__name__}->{ARITH[type(node.op)].__name__} (line {node.lineno})"
+            self._mark(f"{type(node.op).__name__}->{ARITH[type(node.op)].__name__}", node.lineno)
             node.op = ARITH[type(node.op)]()
         return node
 
     def visit_Compare(self, node):
         self.generic_visit(node)
         if node.ops and type(node.ops[0]) in CMP and self._hit():
-            self.applied = f"compare {type(node.ops[0]).__name__}->{CMP[type(node.ops[0])].__name__} (line {node.lineno})"
+            self._mark(f"compare {type(node.ops[0]).__name__}->{CMP[type(node.ops[0])].__name__}", node.lineno)
             node.ops[0] = CMP[type(node.ops[0])]()
         return node
 
     def visit_Constant(self, node):
-        if isinstance(node.value, bool):
+        if isinstance(node.value, str) and node.value:
             if self._hit():
-                self.applied = f"bool {node.value}->{not node.value} (line {node.lineno})"
+                self._mark(f"string {node.value[:20]!r} -> ''", node.lineno)
+                node.value = ""
+        elif isinstance(node.value, bool):
+            if self._hit():
+                self._mark(f"bool {node.value}->{not node.value}", node.lineno)
                 node.value = not node.value
         elif isinstance(node.value, (int, float)) and node.value != 0:
             if self._hit():
-                self.applied = f"constant {node.value}->{node.value + 1} (line {node.lineno})"
+                self._mark(f"constant {node.value}->{node.value + 1}", node.lineno)
                 node.value = node.value + 1
+        return node
+
+    def visit_BoolOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, (ast.And, ast.Or)) and self._hit():
+            new = "Or" if isinstance(node.op, ast.And) else "And"
+            self._mark(f"boolop -> {new}", node.lineno)
+            node.op = ast.Or() if new == "Or" else ast.And()
+        return node
+
+    def visit_AugAssign(self, node):
+        self.generic_visit(node)
+        swap = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult}
+        if type(node.op) in swap and self._hit():
+            self._mark(f"augassign {type(node.op).__name__}->{swap[type(node.op)].__name__}", node.lineno)
+            node.op = swap[type(node.op)]()
+        return node
+
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Not) and self._hit():
+            self._mark("remove 'not'", node.lineno)
+            return node.operand
+        if isinstance(node.op, ast.USub) and self._hit():
+            self._mark("remove unary '-'", node.lineno)
+            return node.operand
         return node
 
     def visit_Return(self, node):
         self.generic_visit(node)
         if node.value is not None and self._hit():
-            self.applied = f"return -> None (line {node.lineno})"
+            self._mark("return -> None", node.lineno)
             node.value = ast.Constant(value=None)
         return node
 
@@ -74,6 +128,14 @@ def _count_sites(tree: ast.AST) -> int:
         elif isinstance(node, ast.Constant) and (isinstance(node.value, bool) or (isinstance(node.value, (int, float)) and node.value != 0)):
             n += 1
         elif isinstance(node, ast.Return) and node.value is not None:
+            n += 1
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+            n += 1
+        elif isinstance(node, ast.AugAssign) and type(node.op) in ARITH:
+            n += 1
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.Not, ast.USub)):
+            n += 1
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value:
             n += 1
     return n
 
@@ -120,6 +182,7 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
                 mutants.append({"file": sol.name, "change": mut.applied, "outcome": "invalid"})
                 continue
             eligible += 1
+            possible_equiv = mut.possible_equivalent
             with tempfile.TemporaryDirectory(prefix="envcert-mut-") as td:
                 ws = Path(td) / "ws"
                 runner.prepare_workspace(task_root, ws, "gold")
@@ -135,8 +198,10 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
                 rejected += 1
             else:
                 survived += 1
-            mutants.append({"file": sol.name, "change": mut.applied, "outcome": outcome})
+            mutants.append({"file": sol.name, "change": mut.applied, "outcome": outcome,
+                            "possible_equivalent": possible_equiv,
+                            "note": "mutation is inside a print/logging call; survival may be equivalent" if possible_equiv else ""})
     rate = (rejected / eligible) if eligible else None
     return {"eligible": eligible, "rejected": rejected, "survived": survived, "invalid": invalid,
             "rejection_rate": rate, "mutants": mutants,
-            "notes": notes or "equivalent mutants may inflate the survived count; interpret as a signal only"}
+            "notes": notes or "equivalent mutants may inflate the survived count; print/logging-only mutants are tagged possible_equivalent; interpret as a signal only"}

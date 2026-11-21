@@ -4,6 +4,23 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+### Added
+- NeMo Gym and Inspect AI adapters (auto-detected; fixture examples included).
+- EC004 multi-step step-completeness auditing; per-step instruction checks.
+- Docker negative controls (EC061 no-op), Docker repeatability (EC062),
+  shell-solution mutation (EC064).
+- OCI image-digest binding (`--image`/`--image-digest`, automatic capture
+  from Docker builds) and OCI subjects in attestations.
+- Cosign OCI attestation (`attest --image`, mutable refs refused),
+  `verify-attestation` command, CUE/Rego policy examples.
+- External (disposable VM/remote) runner protocol
+  (`--execution external --runner-command`).
+- Companion-tool orchestration (`--external-tools`: Hadolint/Trivy/Semgrep
+  as EC070–EC072; absent tools report NOT_RUN).
+- Richer mutation operators and print/logging possible-equivalent tagging.
+
 ## [0.1.0] - 2026-11-22
 
 Initial public-release candidate.

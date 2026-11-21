@@ -47,6 +47,10 @@ class Settings:
     repetitions: int = 3
     enable_mutation: bool = False
     source: str = "defaults"
+    image: str | None = None          # OCI image reference to resolve a digest for
+    image_digest: str | None = None   # explicit sha256:... digest to bind into the report
+    runner_command: str = ""          # external runner executable (execution=external)
+    external_tools: bool = False      # run hadolint/trivy/semgrep companions when installed
 
     def fail_on_names(self) -> list[str]:
         return sorted((s.value for s in self.fail_on), key=lambda v: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].index(v))
@@ -112,6 +116,10 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
     execution_tbl = data.get("execution") or {}
     if execution_tbl.get("mode"):
         s.execution = str(execution_tbl["mode"])
+    if execution_tbl.get("runner_command"):
+        s.runner_command = str(execution_tbl["runner_command"])
+    if execution_tbl.get("image"):
+        s.image = str(execution_tbl["image"])
     s.source = source
     if overrides:
         if overrides.get("profile"):
@@ -132,8 +140,16 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
             s.repetitions = int(overrides["repetitions"])
         if overrides.get("mutation"):
             s.enable_mutation = True
-    if s.execution not in ("none", "docker", "local-python"):
-        raise ConfigError(f"unknown execution mode {s.execution!r}; expected none, docker or local-python")
+        if overrides.get("image"):
+            s.image = str(overrides["image"])
+        if overrides.get("image_digest"):
+            s.image_digest = str(overrides["image_digest"])
+        if overrides.get("runner_command"):
+            s.runner_command = str(overrides["runner_command"])
+        if overrides.get("external_tools"):
+            s.external_tools = True
+    if s.execution not in ("none", "docker", "local-python", "external"):
+        raise ConfigError(f"unknown execution mode {s.execution!r}; expected none, docker, local-python or external")
     if s.repetitions < 1 or s.repetitions > 20:
         raise ConfigError("repetitions must be between 1 and 20")
     return s

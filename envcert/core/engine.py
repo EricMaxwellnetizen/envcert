@@ -6,10 +6,13 @@ from typing import Any
 
 # import for registry side effects
 import envcert.checks.dynamic_checks  # noqa: F401,E402
+import envcert.checks.external_checks  # noqa: F401,E402
 import envcert.checks.static_checks  # noqa: F401,E402
 from envcert import REPORT_SCHEMA_VERSION, __version__
 from envcert.adapters import generic as generic_adapter
 from envcert.adapters import harbor as harbor_adapter
+from envcert.adapters import inspect_adapter
+from envcert.adapters import nemo_gym as nemo_adapter
 from envcert.adapters.base import TaskContext
 from envcert.checks.base import REGISTRY, CheckContext
 from envcert.core.config import Settings
@@ -31,11 +34,48 @@ def load_task(path: Path, adapter_name: str = "auto") -> TaskContext:
     path = Path(path)
     if adapter_name == "harbor" or (adapter_name == "auto" and harbor_adapter.is_harbor_task(path)):
         return harbor_adapter.load(path)
+    if adapter_name == "nemo-gym":
+        return nemo_adapter.load(path)
+    if adapter_name == "inspect":
+        return inspect_adapter.load(path)
     if adapter_name == "generic":
         return generic_adapter.load(path)
     if adapter_name == "auto":
+        if nemo_adapter.is_nemo_gym(path):
+            return nemo_adapter.load(path)
+        if inspect_adapter.is_inspect(path):
+            return inspect_adapter.load(path)
         return generic_adapter.load(path)
     raise ValueError(f"unknown adapter {adapter_name!r}")
+
+
+def resolve_image_digest(settings: Settings) -> tuple[str | None, str]:
+    """Return (digest, note). Explicit digest wins; then a docker-inspect of
+    --image; a bare tag is never treated as a digest."""
+    import re
+    import shutil
+    import subprocess
+
+    if settings.image_digest:
+        d = settings.image_digest.strip()
+        return (d if re.fullmatch(r"sha256:[0-9a-f]{64}", d) else None,
+                "explicit --image-digest" if re.fullmatch(r"sha256:[0-9a-f]{64}", d) else "invalid --image-digest ignored (expected sha256:<64 hex>)")
+    if settings.image:
+        ref = settings.image
+        if "@sha256:" in ref:
+            return "sha256:" + ref.rsplit("@sha256:", 1)[1], "digest taken from --image reference"
+        exe = shutil.which("docker")
+        if not exe:
+            return None, f"could not resolve digest for {ref!r}: docker not installed (pass --image-digest explicitly)"
+        try:
+            proc = subprocess.run([exe, "image", "inspect", "--format", "{{.Id}}", ref],
+                                  capture_output=True, text=True, timeout=30)
+            if proc.returncode == 0 and proc.stdout.strip().startswith("sha256:"):
+                return proc.stdout.strip(), f"resolved --image {ref!r} via docker image inspect (.Id)"
+            return None, f"could not resolve digest for {ref!r}: image not present locally or inspect failed"
+        except Exception as exc:  # noqa: BLE001
+            return None, f"could not resolve digest for {ref!r}: {exc}"
+    return None, ""
 
 
 def selected_checks(settings: Settings) -> list[str]:
@@ -55,7 +95,11 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
     ctx = load_task(task_path, adapter_name)
     digest, file_count = bundle_digest(ctx.root)
     check_ctx = CheckContext(task=ctx, execution=settings.execution, repetitions=settings.repetitions,
-                             enable_mutation=settings.enable_mutation)
+                             enable_mutation=settings.enable_mutation, external_tools=settings.external_tools,
+                             runner_command=settings.runner_command)
+    image_digest, image_note = resolve_image_digest(settings)
+    if image_note and (settings.image or settings.image_digest):
+        ctx.warnings.append(f"image digest: {image_note}")
     findings: list[Finding] = []
     errors: list[dict[str, str]] = []
     executed: list[str] = []
@@ -87,6 +131,13 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
     elif settings.execution == "local-python":
         ri = LocalPythonRunner().info()
         runner_info = {"name": ri.name, "available": ri.available, "reason": ri.reason, "isolation": ri.isolation}
+    elif settings.execution == "external":
+        from envcert.runners.external_runner import ExternalRunner
+
+        ri = ExternalRunner(settings.runner_command).info()
+        runner_info = {"name": ri.name, "available": ri.available, "reason": ri.reason, "isolation": ri.isolation}
+    if image_digest is None and check_ctx.shared.get("image_digest"):
+        image_digest = check_ctx.shared["image_digest"]
     verifier_digest = _dir_digest(ctx, ctx.tests_dir)
     solution_digest = _dir_digest(ctx, ctx.solution_dir)
     report: dict[str, Any] = {
@@ -102,7 +153,8 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
             "file_count": file_count,
             "verifier_digest_sha256": verifier_digest,
             "solution_digest_sha256": solution_digest,
-            "image_digest": None,
+            "image_digest": image_digest,
+            "image_reference": settings.image,
             "warnings": ctx.warnings,
         },
         "execution": {
@@ -112,6 +164,7 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
             "fail_on": settings.fail_on_names(),
             "repetitions": settings.repetitions,
             "mutation_enabled": settings.enable_mutation,
+            "external_tools": settings.external_tools,
             "runner": runner_info,
         },
         "checks_executed": executed,

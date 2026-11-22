@@ -4,6 +4,38 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-22
+
+### Fixed
+- **No false PASS when the verifier cannot run**: the local-python runner now
+  detects that `pytest` is missing and reports an execution error instead of
+  a test failure. EC060/EC061/EC062/EC063 return ERROR (never PASS) when the
+  verifier never ran — previously EC061 and EC062 could report "no-op
+  rejected" and "outcome repeatable" for a runner that did not execute a
+  single test. Docker shell mutation (EC064) and mutation mutants that fail
+  to execute are likewise no longer counted as verifier rejections.
+- **Baseline suppression is verifiable, not self-asserted**: `verify` and
+  `attest` recompute suppression from the baseline report. A report that
+  marks findings as `baseline_suppressed` now requires `--baseline <file>`;
+  without it, or when the flagged findings are absent from the baseline, the
+  report is rejected (exit 2) instead of being accepted with a passing
+  policy.
+- **Reports from EnvCert 0.1.0/0.2.0 verify again**: the consistency
+  validator no longer requires summary counters that those versions did not
+  write (0.3.0+ reports remain strictly checked).
+- `verify` no longer implies that a report's findings are complete: the
+  output states that checks are not re-run unless asked.
+
+### Added
+- `envcert verify --recheck --task <dir>`: re-runs the report's static checks
+  against the task and compares the findings, so findings dropped from (or
+  added to) a report are detected.
+- `envcert verify --fail-on critical,high`: evaluates the policy under the
+  consumer's own severity threshold instead of the report's self-asserted
+  `fail_on`; a failing policy exits 1.
+- `envcert attest --baseline <file>`: verifies baseline suppression before
+  building an attestation.
+
 ## [0.3.1] - 2026-11-22
 
 ### Fixed

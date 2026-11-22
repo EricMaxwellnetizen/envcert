@@ -284,6 +284,65 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
     return report
 
 
+def recheck_report(report: dict[str, Any], task_path: Path) -> list[str]:
+    """Re-run the static checks recorded in a report and compare the findings.
+
+    This answers a question report schema validation cannot: *are the findings
+    in this report the findings EnvCert actually produces for this task?*
+    Dynamic checks are not re-run (they execute task code); external-tool
+    checks are skipped because their availability changes between machines.
+    """
+    from collections import Counter
+
+    from envcert.core.config import PROFILES, Settings
+    from envcert.core.errors import ConfigError
+
+    problems: list[str] = []
+    execution = report.get("execution") or {}
+    environment = report.get("environment") or {}
+    profile = str(execution.get("profile") or "harbor")
+    if profile not in PROFILES:
+        return [f"report names an unknown profile {profile!r}; cannot re-check"]
+    executed = report.get("checks_executed") or []
+    unknown = [cid for cid in executed if cid not in REGISTRY]
+    if unknown:
+        problems.append(f"report references unknown check IDs: {sorted(unknown)}")
+    static_ids = [cid for cid in executed
+                  if cid in REGISTRY
+                  and not REGISTRY[cid][0].dynamic
+                  and REGISTRY[cid][0].category != "external"]
+    if not static_ids:
+        return problems or ["report records no static checks to re-check"]
+    settings = Settings(profile=profile, enabled=list(static_ids), execution="none", external_tools=False)
+    try:
+        rerun = run_checks(task_path, settings, adapter_name=str(environment.get("adapter") or "auto"))
+    except ConfigError as exc:
+        return problems + [f"could not re-run the checks: {exc}"]
+    except Exception as exc:  # noqa: BLE001
+        return problems + [f"could not re-run the checks: {type(exc).__name__}: {exc}"]
+
+    def key(finding: dict[str, Any]) -> tuple:
+        return (finding.get("check_id"), finding.get("status"), finding.get("severity"),
+                finding.get("path"), finding.get("line"))
+
+    reported = Counter(
+        key(f) for f in report.get("findings") or []
+        if isinstance(f, dict) and f.get("check_id") in static_ids and not f.get("baseline_suppressed")
+    )
+    reproduced = Counter(key(f) for f in rerun.get("findings") or [] if f.get("check_id") in static_ids)
+    for item, count in (reported - reproduced).items():
+        problems.append(
+            f"finding reported but not reproduced on re-check: {item[0]} {item[1]}/{item[2]} "
+            f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
+        )
+    for item, count in (reproduced - reported).items():
+        problems.append(
+            f"finding reproduced on re-check but missing from the report: {item[0]} {item[1]}/{item[2]} "
+            f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
+        )
+    return problems
+
+
 def _dir_digest(ctx: TaskContext, directory: Path | None) -> str | None:
     if directory is None or not directory.is_dir():
         return None

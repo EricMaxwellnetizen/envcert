@@ -19,7 +19,11 @@ from envcert.checks.base import REGISTRY
 from envcert.core.config import PROFILES, load_settings
 from envcert.core.engine import run_checks
 from envcert.core.errors import EnvCertError
-from envcert.core.report import validate_report_consistency
+from envcert.core.report import (
+    suppressed_findings,
+    validate_baseline_suppression,
+    validate_report_consistency,
+)
 from envcert.core.rollup import rollup_to_text, run_dataset_rollup
 from envcert.reports.sarif import to_sarif
 from envcert.reports.text import to_text
@@ -146,6 +150,47 @@ def cmd_verify(args) -> int:
         for p in problems:
             print(f"  - {p}")
         return EXIT_INVALID
+    suppressed = suppressed_findings(report)
+    if suppressed:
+        baseline_path = Path(args.baseline) if getattr(args, "baseline", None) else None
+        if baseline_path is None:
+            recorded = (report.get("summary") or {}).get("baseline")
+            print("report validation FAILED:", file=sys.stderr)
+            print(f"  - the report suppresses {len(suppressed)} finding(s) via a baseline "
+                  f"({recorded or 'baseline not recorded'}) but no baseline was supplied; "
+                  f"pass --baseline {recorded or '<baseline.json>'} to verify the suppression", file=sys.stderr)
+            return EXIT_INVALID
+        if not baseline_path.is_file():
+            print(f"error: baseline report not found: {baseline_path}", file=sys.stderr)
+            return EXIT_INVALID
+        try:
+            baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"error: baseline report is not valid JSON: {exc}", file=sys.stderr)
+            return EXIT_INVALID
+        baseline_problems = validate_baseline_suppression(report, baseline_report)
+        if baseline_problems:
+            print("report validation FAILED (baseline suppression does not match the baseline report):")
+            for p in baseline_problems:
+                print(f"  - {p}")
+            return EXIT_INVALID
+    failures: list[str] = []
+    if getattr(args, "fail_on", None) is not None:
+        from envcert.core.config import parse_fail_on
+
+        severities = parse_fail_on([s.strip() for s in args.fail_on.split(",") if s.strip()], "--fail-on")
+        failing = [
+            f for f in report.get("findings") or []
+            if f.get("status") in ("FAIL", "WARN")
+            and f.get("severity") in {s.value for s in severities}
+            and not f.get("baseline_suppressed")
+        ]
+        errored = [f for f in report.get("findings") or [] if f.get("status") == "ERROR"]
+        if failing or errored:
+            failures.append(
+                f"policy fails under --fail-on {args.fail_on}: {len(failing)} failing finding(s), "
+                f"{len(errored)} errored check(s)"
+            )
     if args.task:
         from envcert.core.digests import bundle_digest
 
@@ -155,12 +200,32 @@ def cmd_verify(args) -> int:
             print(f"note: {warning}", file=sys.stderr)
         recorded = (report.get("environment") or {}).get("bundle_digest_sha256")
         if recorded != digest:
-            print("report verification FAILED (task contents do not match the report):")
-            print(f"  - bundle digest mismatch: report={recorded} recomputed={digest} (task changed since the report was generated)")
-            return EXIT_POLICY
+            failures.append(
+                f"bundle digest mismatch: report={recorded} recomputed={digest} (task changed since the report was generated)"
+            )
+    if getattr(args, "recheck", False):
+        if not args.task:
+            print("error: --recheck requires --task (the task directory to re-run the checks against)",
+                  file=sys.stderr)
+            return EXIT_INVALID
+        from envcert.core.engine import recheck_report
+
+        recheck_problems = recheck_report(report, Path(args.task))
+        if recheck_problems:
+            failures.extend(recheck_problems)
+        else:
+            print("re-check OK: the report's static findings reproduce from the task")
+    if failures:
+        print("report verification FAILED:")
+        for f in failures:
+            print(f"  - {f}")
+        return EXIT_POLICY
     print(f"report OK: schema {report.get('schema_version')}, EnvCert {report.get('envcert_version')}, "
           f"task {(report.get('environment') or {}).get('task_name')}, policy passed={ (report.get('policy') or {}).get('passed')}")
-    print("note: this verifies report schema/consistency (and the bundle digest when --task is given) by recomputing policy and summary from the findings. It does NOT verify a cryptographic signature; unsigned reports are not cryptographically verified.")
+    print("note: this verifies report schema/consistency by recomputing policy and summary from the findings"
+          + (", the bundle digest" if args.task else "")
+          + ". It does NOT re-run the checks (use --recheck --task for that), does NOT verify a cryptographic"
+            " signature, and a report that omits findings entirely cannot be detected without --recheck.")
     return EXIT_OK
 
 
@@ -181,6 +246,31 @@ def cmd_attest(args) -> int:
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return EXIT_INVALID
+    suppressed = suppressed_findings(report)
+    if suppressed:
+        baseline_path = Path(args.baseline) if getattr(args, "baseline", None) else None
+        if baseline_path is None:
+            recorded = (report.get("summary") or {}).get("baseline")
+            print("error: refusing to attest a report whose policy depends on unverifiable baseline suppression:",
+                  file=sys.stderr)
+            print(f"  - {len(suppressed)} finding(s) are marked baseline_suppressed via "
+                  f"{recorded or 'an unrecorded baseline'}; pass --baseline {recorded or '<baseline.json>'} "
+                  "so the suppression can be checked", file=sys.stderr)
+            return EXIT_INVALID
+        if not baseline_path.is_file():
+            print(f"error: baseline report not found: {baseline_path}", file=sys.stderr)
+            return EXIT_INVALID
+        try:
+            baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"error: baseline report is not valid JSON: {exc}", file=sys.stderr)
+            return EXIT_INVALID
+        baseline_problems = validate_baseline_suppression(report, baseline_report)
+        if baseline_problems:
+            print("error: refusing to attest: baseline suppression does not match the baseline report:", file=sys.stderr)
+            for p in baseline_problems:
+                print(f"  - {p}", file=sys.stderr)
+            return EXIT_INVALID
     if getattr(args, "image", None):
         if "@sha256:" not in args.image:
             print(f"error: --image must be an immutable reference name@sha256:<64 hex>, got {args.image!r}", file=sys.stderr)
@@ -394,9 +484,15 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--quiet", action="store_true", help="suppress the stderr summary when --output is used")
     pc.set_defaults(fn=cmd_check)
 
-    pver = sub.add_parser("verify", help="validate a JSON report against the published schema (and optionally re-check the bundle digest)")
+    pver = sub.add_parser("verify", help="validate a JSON report against the published schema, recompute policy/summary, and optionally re-check the task")
     pver.add_argument("report")
     pver.add_argument("--task", default=None, help="task directory to recompute the bundle digest from")
+    pver.add_argument("--baseline", default=None,
+                      help="baseline report the report claims to rely on (required when the report suppresses findings)")
+    pver.add_argument("--recheck", action="store_true",
+                      help="re-run the report's static checks against --task and compare the findings")
+    pver.add_argument("--fail-on", default=None,
+                      help="evaluate the policy under these severities (comma-separated) instead of the report's own fail_on")
     pver.set_defaults(fn=cmd_verify)
 
     pa = sub.add_parser("attest", help="create an in-toto Test Result attestation from a JSON report")
@@ -406,6 +502,8 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--sign", action="store_true", help="sign with cosign sign-blob if cosign is installed")
     pa.add_argument("--image", default=None, help="also attach the attestation to this OCI image (name@sha256:<digest>) via cosign attest; requires cosign")
     pa.add_argument("--key", default=None, help="cosign private key path")
+    pa.add_argument("--baseline", default=None,
+                    help="baseline report the report relies on (required when the report suppresses findings)")
     pa.set_defaults(fn=cmd_attest)
 
     pdf = sub.add_parser("diff", help="compare two JSON reports: new vs resolved findings (trend diffing)")

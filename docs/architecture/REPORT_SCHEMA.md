@@ -48,6 +48,21 @@ from the findings (using the recorded `fail_on` severities and
 disagree with its own findings is rejected with exit code 2; `envcert attest`
 refuses to build an attestation from such a report.
 
+Three checks are opt-in because they need evidence the report does not carry:
+
+- `--baseline <report.json>` recomputes which findings the baseline actually
+  covers. A report that claims `baseline_suppressed` findings is rejected
+  (exit 2) unless the baseline is supplied and matches.
+- `--recheck --task <dir>` re-runs the report's static checks against the
+  task and compares the findings; differences are reported as verification
+  failures (exit 1). This is how a consumer detects findings that were
+  dropped from a report.
+- `--fail-on critical,high` evaluates the policy under the consumer's own
+  severity threshold instead of the report's self-asserted `fail_on`.
+
+Without `--recheck`, `verify` proves internal consistency only: it cannot
+detect a report whose findings were removed wholesale.
+
 ## Attestation binding (in-toto Test Result)
 
 `envcert attest report.json` emits an in-toto Statement v1:

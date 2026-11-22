@@ -191,18 +191,22 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
     mutants: list[dict] = []
     eligible = rejected = survived = invalid = 0
     uncovered = 0
+    errors = 0
     notes = ""
     sol_files = sorted((task_root / "solution").rglob("*.py")) if (task_root / "solution").is_dir() else []
     coverage_map: dict | None = None
     if not sol_files:
-        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "rejection_rate": None,
-                "mutants": [], "notes": "no solution/*.py files", "coverage_used": False}
+        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "errors": 0,
+                "rejection_rate": None, "mutants": [], "notes": "no solution/*.py files", "coverage_used": False}
     coverage_map = _coverage_map(task_root, runner, timeout=timeout)
     # gold must pass first, otherwise mutants are meaningless
     gold = runner.run_task(task_root, "gold", timeout=timeout)
     if not gold.ok:
-        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "rejection_rate": None,
-                "mutants": [], "notes": "gold solution does not pass; mutation skipped", "coverage_used": coverage_map is not None}
+        notes = ("gold solution does not pass; mutation skipped" if not gold.error
+                 else f"gold run could not execute: {gold.error}")
+        return {"eligible": 0, "rejected": 0, "survived": 0, "invalid": 0, "uncovered": 0, "errors": 0,
+                "rejection_rate": None, "mutants": [], "notes": notes,
+                "error": gold.error, "coverage_used": coverage_map is not None}
     budget = max_mutants
     for sol in sol_files:
         if budget <= 0:
@@ -248,6 +252,14 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
                     target = ws / "solution" / sol.name
                 target.write_text(mutated, encoding="utf-8")
                 result = runner.run_python_verifier(ws, timeout=timeout)
+            if result.error and result.reward is None:
+                # The mutant could not be executed: that is not evidence that
+                # the verifier rejected it.
+                errors += 1
+                eligible -= 1
+                mutants.append({"file": sol.name, "change": mut.applied, "outcome": "execution-error",
+                                "possible_equivalent": False, "note": result.error})
+                continue
             outcome = "survived" if result.ok else "rejected"
             if outcome == "rejected":
                 rejected += 1
@@ -258,6 +270,6 @@ def run_mutation(task_root: Path, max_mutants: int = 10, timeout: int = 60) -> d
                             "note": "mutation is inside a print/logging call; survival may be equivalent" if possible_equiv else ""})
     rate = (rejected / eligible) if eligible else None
     return {"eligible": eligible, "rejected": rejected, "survived": survived, "invalid": invalid,
-            "uncovered": uncovered,
+            "uncovered": uncovered, "errors": errors,
             "rejection_rate": rate, "mutants": mutants, "coverage_used": coverage_map is not None,
             "notes": notes or "equivalent mutants may inflate the survived count; print/logging-only mutants are tagged possible_equivalent; interpret as a signal only"}

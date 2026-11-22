@@ -55,6 +55,15 @@ def finding_fingerprint(finding: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _version_at_least(version: Any, minimum: tuple[int, int]) -> bool:
+    """True when the report's envcert_version is >= minimum (e.g. (0, 3))."""
+    try:
+        parts = str(version).split(".")
+        return (int(parts[0]), int(parts[1])) >= minimum
+    except (AttributeError, IndexError, ValueError):
+        return False
+
+
 def _severity_set(value: Any) -> set[str] | None:
     if not isinstance(value, list) or not value:
         return None
@@ -162,23 +171,22 @@ def validate_report_consistency(report: dict[str, Any]) -> list[str]:
         f["severity"] for f in valid_findings if f["status"] in (Status.FAIL.value, Status.WARN.value)
     )
     expected_suppressed = sum(1 for f in valid_findings if f.get("baseline_suppressed") is True)
-    if summary.get("total_findings") != len(valid_findings):
-        problems.append(
-            f"summary.total_findings={summary.get('total_findings')!r} does not match {len(valid_findings)} findings"
-        )
-    if summary.get("by_status") != dict(expected_status):
-        problems.append(
-            f"summary.by_status={summary.get('by_status')!r} does not match findings {dict(expected_status)!r}"
-        )
-    if summary.get("by_severity_failing") != dict(expected_severity):
-        problems.append(
-            "summary.by_severity_failing="
-            f"{summary.get('by_severity_failing')!r} does not match findings {dict(expected_severity)!r}"
-        )
-    if summary.get("baseline_suppressed") != expected_suppressed:
-        problems.append(
-            f"summary.baseline_suppressed={summary.get('baseline_suppressed')!r} does not match {expected_suppressed} suppressed findings"
-        )
+    # Reports from EnvCert < 0.3.0 did not carry every summary counter (the
+    # report schema is still 1.0.0), so absent counters are only an error for
+    # versions that always wrote them.
+    modern = _version_at_least(report.get("envcert_version"), (0, 3))
+    summary_checks = (
+        ("total_findings", len(valid_findings)),
+        ("by_status", dict(expected_status)),
+        ("by_severity_failing", dict(expected_severity)),
+        ("baseline_suppressed", expected_suppressed),
+    )
+    for key, expected in summary_checks:
+        if key in summary:
+            if summary[key] != expected:
+                problems.append(f"summary.{key}={summary[key]!r} does not match {expected!r} from the findings")
+        elif modern:
+            problems.append(f"summary.{key} is missing")
     if expected_suppressed and not summary.get("baseline"):
         problems.append("findings claim baseline suppression but summary.baseline is empty")
 
@@ -201,4 +209,44 @@ def validate_report_consistency(report: dict[str, Any]) -> list[str]:
         if overlap:
             problems.append(f"checks are listed as both executed and not executed: {overlap}")
 
+    return problems
+
+
+def suppressed_findings(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Findings the report claims are covered by a baseline."""
+    findings = report.get("findings")
+    if not isinstance(findings, list):
+        return []
+    return [f for f in findings
+            if isinstance(f, dict) and f.get("baseline_suppressed") is True
+            and f.get("status") in (Status.FAIL.value, Status.WARN.value)]
+
+
+def validate_baseline_suppression(report: dict[str, Any], baseline_report: dict[str, Any]) -> list[str]:
+    """Recompute baseline suppression from the baseline report and compare it
+    with the flags in the report under verification.
+
+    Without this, a report could mark every failing finding as
+    "baseline_suppressed" and assert a passing policy without ever showing
+    the baseline it claims to rely on.
+    """
+    problems: list[str] = []
+    if not isinstance(baseline_report, dict):
+        return ["baseline report is not a JSON object"]
+    base_findings = baseline_report.get("findings")
+    if not isinstance(base_findings, list):
+        return ["baseline report has no findings list"]
+    baseline_fingerprints = {finding_fingerprint(f) for f in base_findings if isinstance(f, dict)}
+    for finding in report.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("status") not in (Status.FAIL.value, Status.WARN.value):
+            continue
+        if finding.get("baseline_suppressed") is not True:
+            # Not suppressed: the operator simply chose not to suppress it.
+            continue
+        if finding_fingerprint(finding) not in baseline_fingerprints:
+            label = f"{finding.get('check_id')} at {finding.get('path') or '-'}:{finding.get('line') or '-'}"
+            problems.append(
+                f"finding is marked baseline_suppressed but is not present in the baseline report: {label}")
     return problems

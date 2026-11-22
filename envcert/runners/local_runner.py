@@ -21,11 +21,27 @@ from envcert.runners.base import Runner, RunnerInfo, RunResult
 
 MAX_OUTPUT = 20000
 
+PYTEST_MISSING = ("pytest is not installed in the environment running EnvCert; "
+                  "install pytest (pip install pytest) to use --execution local-python")
+
+
+def pytest_available() -> bool:
+    """True when the interpreter running EnvCert can import pytest."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("pytest") is not None
+    except (ImportError, ValueError):  # pragma: no cover - defensive
+        return False
+
 
 class LocalPythonRunner(Runner):
     name = "local-python"
 
     def info(self) -> RunnerInfo:
+        if not pytest_available():
+            return RunnerInfo(name=self.name, available=False, reason=PYTEST_MISSING,
+                              isolation="none: task code runs as the current user in a temp copy; use only on trusted tasks")
         return RunnerInfo(name=self.name, available=True,
                           reason="local subprocess execution (no sandbox)",
                           isolation="none: task code runs as the current user in a temp copy; use only on trusted tasks")
@@ -54,6 +70,8 @@ class LocalPythonRunner(Runner):
 
     def run_python_verifier(self, workdir, timeout: int = 120) -> RunResult:
         workdir = Path(workdir)
+        if not pytest_available():
+            return RunResult(ok=False, error=PYTEST_MISSING)
         env = {"PATH": os.environ.get("PATH", ""), "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
                "TEMP": str(workdir), "TMP": str(workdir), "PYTHONDONTWRITEBYTECODE": "1"}
         if os.name != "nt":
@@ -66,6 +84,10 @@ class LocalPythonRunner(Runner):
             dur = time.time() - start
             out = (proc.stdout or "")[-MAX_OUTPUT:]
             err = (proc.stderr or "")[-MAX_OUTPUT:]
+            if "No module named pytest" in err:
+                # pytest disappeared between the probe and the run
+                return RunResult(ok=False, error=PYTEST_MISSING, exit_code=proc.returncode,
+                                 stdout=out, stderr=err, duration_sec=round(dur, 3))
             return RunResult(ok=proc.returncode == 0, exit_code=proc.returncode, stdout=out, stderr=err,
                              reward=1.0 if proc.returncode == 0 else 0.0, duration_sec=round(dur, 3))
         except subprocess.TimeoutExpired:

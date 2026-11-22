@@ -12,7 +12,7 @@ required, so configuration cannot silently fall back to unsandboxed
 |---|---|---|---|
 | `none` (default) | Nothing. Dynamic checks return NOT_RUN. | n/a | CI static gates, untrusted bundles |
 | `docker` | Builds `environment/Dockerfile`, runs solution + verifier in a container, reads the reward | Container with `--cap-drop ALL`, `no-new-privileges`, 2 CPU / 2 GB / 256 PIDs limits, timeout, network per flag (default none), read-only task mount, **no docker.sock**, image removed afterwards | Trusted-enough Harbor tasks on a host where Docker risk is accepted. Docker shares the host kernel — it is **not** a VM |
-| `local-python` | `pytest tests/` in a temp copy of the task | **None** — code runs as your user | Only tasks you wrote/trust; EnvCert's mutation & negative-control demos |
+| `local-python` | `pytest tests/` in a temp copy of the task | **None** — code runs as your user | Only tasks you wrote/trust; EnvCert's mutation & negative-control demos. Requires `pytest` in the environment running EnvCert |
 | `external` | Your command: `<cmd> --task <dir> --variant gold\|noop --timeout <s>` → last stdout line is JSON `{"reward": ..., "exit_code": ...}` | Whatever your disposable VM/remote sandbox provides (recorded verbatim in the report) | Organisations with a real sandbox fleet; set `--runner-command` or `[execution] runner_command` |
 
 Under Docker, EC061 runs the no-op variant (reference solution skipped) and
@@ -25,7 +25,10 @@ The Docker gold run's image digest is captured automatically into
 If Docker is unavailable, EC060 reports ERROR/NOT_RUN with the daemon's
 reason — never a fabricated pass. The report records the runner and its
 isolation description (`execution.runner.isolation`) so evidence consumers
-can judge it.
+can judge it. The same rule applies when `pytest` is missing on the host:
+the local-python checks return ERROR rather than a test "failure", and the
+negative control / repeatability checks never report PASS for a verifier
+that did not run.
 
 ## Negative controls & mutation semantics
 

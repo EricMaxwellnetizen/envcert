@@ -122,6 +122,8 @@ envcert check ./examples/python-task --execution local-python --mutation
 ```bash
 envcert check ./my-task --format json --output report.json
 envcert verify report.json --task ./my-task        # schema + consistency + bundle digest
+envcert verify report.json --task ./my-task --recheck   # + re-run the static checks and compare
+envcert verify report.json --baseline old.json     # verify the baseline suppression
 envcert schema                                     # published JSON Schema (report 1.0.0)
 envcert attest report.json --output attestation.json          # in-toto Test Result statement
 envcert attest report.json --dsse --sign --key cosign.key     # DSSE + Cosign, when installed
@@ -129,16 +131,18 @@ envcert verify-attestation attestation.json --key cosign.pub  # verify a detache
 ```
 
 `verify` recomputes policy and summary counts from the findings, so editing
-`policy.passed` or the counters is detected. Unsigned attestations are
-labelled unsigned everywhere and require `--allow-unsigned` for structural
-verification only — they are portable evidence records, not cryptographic
-proof. Report fields and the attestation extension are specified in
-`docs/architecture/REPORT_SCHEMA.md`.
+`policy.passed` or the counters is detected; `--recheck` additionally proves
+that the report's findings are the findings EnvCert produces for the task.
+Reports that rely on baseline suppression must be verified with `--baseline`.
+Unsigned attestations are labelled unsigned everywhere and require
+`--allow-unsigned` for structural verification only — they are portable
+evidence records, not cryptographic proof. Report fields and the attestation
+extension are specified in `docs/architecture/REPORT_SCHEMA.md`.
 
 ## GitHub Actions
 
 ```yaml
-- uses: EricMaxwellnetizen/envcert@v0.3.1   # or @v0 for the latest 0.x
+- uses: EricMaxwellnetizen/envcert@v0.3.2   # or @v0 for the latest 0.x
   with:
     path: ./my-task
     fail-on: critical,high

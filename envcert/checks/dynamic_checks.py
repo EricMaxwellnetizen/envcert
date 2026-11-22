@@ -78,6 +78,7 @@ def check_gold(c: CheckContext) -> list:
     if result is None:
         return [not_applicable(EC060, f"Gold run not supported here: {why}.")]
     if result.error and result.reward is None:
+        c.shared["gold_execution_error"] = result.error
         return [finding(EC060, Status.ERROR, f"Gold execution failed to run: {result.error}",
                         severity=Severity.INFO, evidence={"error": result.error, "runner": c.execution})]
     if result.reward is not None:
@@ -101,6 +102,14 @@ def check_negative_control(c: CheckContext) -> list:
         return [not_applicable(EC061, f"Negative control not supported here: {why}.")]
     if result.error and result.reward is None:
         return [finding(EC061, Status.ERROR, f"Negative-control execution failed to run: {result.error}", severity=Severity.INFO, evidence={"error": result.error})]
+    gold_error = c.shared.get("gold_execution_error")
+    if gold_error:
+        # The gold run never executed: a rejected no-op proves nothing about
+        # verifier strength, so this must not be reported as a PASS.
+        return [finding(EC061, Status.ERROR,
+                        f"Negative control could not be evaluated: the gold run failed to execute ({gold_error}). "
+                        "A rejected no-op is not evidence when the verifier never ran.",
+                        severity=Severity.INFO, evidence={"gold_error": gold_error})]
     # Reward, when present, is authoritative (a docker harness exits 0 even
     # when the reward is 0); only fall back to exit status without a reward.
     noop_passed = (result.reward >= 1.0) if result.reward is not None else result.ok
@@ -123,6 +132,12 @@ def check_repeatability(c: CheckContext) -> list:
             if r is None:
                 return [not_applicable(EC062, f"Repeatability not supported here: {_why}.")]
             outcomes.append({"reward": r.reward, "exit_code": r.exit_code, "error": r.error})
+        if any(o["error"] and o["reward"] is None for o in outcomes):
+            errors = sorted({o["error"] for o in outcomes if o["error"]})
+            return [finding(EC062, Status.ERROR,
+                            f"Repeatability could not be measured: the gold run failed to execute ({'; '.join(errors)}). "
+                            "Consistent failures are not evidence of repeatability.",
+                            severity=Severity.INFO, evidence={"runs": outcomes})]
         rewards = {o["reward"] for o in outcomes}
         if len(rewards) == 1 and None not in rewards:
             return [passed(EC062, f"Gold reward was consistent across {len(outcomes)} {c.execution} runs (reward={outcomes[0]['reward']}).", evidence={"runs": outcomes})]
@@ -136,6 +151,12 @@ def check_repeatability(c: CheckContext) -> list:
     for _ in range(max(2, c.repetitions)):
         r = runner.run_task(c.task.root, solution_variant="gold")
         outcomes.append({"reward": r.reward, "exit_code": r.exit_code, "error": r.error})
+    if any(o["error"] and o["reward"] is None for o in outcomes):
+        errors = sorted({o["error"] for o in outcomes if o["error"]})
+        return [finding(EC062, Status.ERROR,
+                        f"Repeatability could not be measured: the gold run failed to execute ({'; '.join(errors)}). "
+                        "Consistent failures are not evidence of repeatability.",
+                        severity=Severity.INFO, evidence={"runs": outcomes})]
     rewards = {o["reward"] for o in outcomes}
     if len(rewards) == 1 and None not in rewards:
         return [passed(EC062, f"Gold outcome was consistent across {len(outcomes)} runs (reward={outcomes[0]['reward']}).",
@@ -153,11 +174,15 @@ def check_mutation(c: CheckContext) -> list:
     from envcert.checks.mutation import run_mutation
 
     report = run_mutation(c.task.root, max_mutants=c.max_mutants)
+    if report.get("error"):
+        return [finding(EC063, Status.ERROR, f"Mutation testing could not run: {report['error']}",
+                        severity=Severity.INFO, evidence={"error": report["error"], "runner": c.execution})]
     if report["eligible"] == 0:
         return [not_applicable(EC063, f"No eligible mutants could be generated/applied: {report['notes']}")]
     rate = report["rejection_rate"]
     ev = {"tested": report["eligible"], "rejected": report["rejected"], "survived": report["survived"],
           "invalid": report["invalid"], "uncovered_inconclusive": report.get("uncovered", 0),
+          "execution_errors": report.get("errors", 0),
           "coverage_used": report.get("coverage_used", False),
           "rejection_rate": rate, "mutants": report["mutants"][:20]}
     if rate is not None and rate < 0.5:
@@ -201,23 +226,39 @@ def check_shell_mutation(c: CheckContext) -> list:
     if not runner.info().available:
         return [finding(EC064, Status.ERROR, f"Docker unavailable for shell mutation: {runner.info().reason}", severity=Severity.INFO, evidence={"runner": "docker"})]
     gold = runner.run_harbor_task(c.task.root, variant="gold")
+    if gold.error and gold.reward is None:
+        return [finding(EC064, Status.ERROR, f"Shell mutation could not run: the gold execution failed ({gold.error})",
+                        severity=Severity.INFO, evidence={"error": gold.error, "runner": "docker"})]
     if gold.reward is not None and gold.reward < 1.0:
         return [not_applicable(EC064, f"Gold run does not pass (reward={gold.reward}); mutation would be meaningless.")]
-    results = []
+    results: list[dict] = []
     rejected = 0
+    errors = 0
     for desc, mutated in mutants[: c.max_mutants]:
         with tempfile.TemporaryDirectory(prefix="envcert-shellmut-") as td:
             dest = Path(td) / "task"
             shutil.copytree(c.task.root, dest, ignore=shutil.ignore_patterns(".git"))
             (dest / solve_rel).write_text(mutated, encoding="utf-8")
             r = runner.run_harbor_task(dest, variant="gold")
+        if r.error and r.reward is None:
+            # The mutant could not be executed: that is not evidence that the
+            # verifier rejected it.
+            errors += 1
+            results.append({"change": desc, "reward": None, "outcome": "execution-error", "error": r.error})
+            continue
         survived = r.reward is not None and r.reward >= 1.0
         results.append({"change": desc, "reward": r.reward, "outcome": "survived" if survived else "rejected"})
         rejected += 0 if survived else 1
-    rate = rejected / len(results) if results else None
-    if rate is not None and rate < 0.5:
-        return [finding(EC064, Status.WARN, f"Shell-solution mutation rejection rate is {rate:.0%} ({rejected}/{len(results)}); mutated (wrong) solutions still pass.", evidence={"mutants": results, "rejection_rate": rate})]
-    return [passed(EC064, f"Shell-solution mutation rejection rate {rate:.0%} ({rejected}/{len(results)}). A strength signal, not proof of verifier correctness.", evidence={"mutants": results, "rejection_rate": rate})]
+    executed = [r for r in results if r["outcome"] != "execution-error"]
+    if not executed:
+        return [finding(EC064, Status.ERROR,
+                        f"Shell mutation mutants could not be executed ({errors} execution error(s)); no rejection evidence was obtained.",
+                        severity=Severity.INFO, evidence={"mutants": results, "execution_errors": errors, "runner": "docker"})]
+    rate = rejected / len(executed)
+    ev = {"mutants": results, "rejection_rate": rate, "execution_errors": errors}
+    if rate < 0.5:
+        return [finding(EC064, Status.WARN, f"Shell-solution mutation rejection rate is {rate:.0%} ({rejected}/{len(executed)}); mutated (wrong) solutions still pass.", evidence=ev)]
+    return [passed(EC064, f"Shell-solution mutation rejection rate {rate:.0%} ({rejected}/{len(executed)}). A strength signal, not proof of verifier correctness.", evidence=ev)]
 
 
 @check(EC065)

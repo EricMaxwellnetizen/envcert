@@ -57,7 +57,7 @@ class Settings:
         return sorted((s.value for s in self.fail_on), key=lambda v: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].index(v))
 
 
-def _parse_fail_on(values: Any, where: str) -> set[Severity]:
+def parse_fail_on(values: Any, where: str) -> set[Severity]:
     if not isinstance(values, list) or not values:
         raise ConfigError(f"{where}: fail_on must be a non-empty list of severities")
     out = set()
@@ -67,6 +67,9 @@ def _parse_fail_on(values: Any, where: str) -> set[Severity]:
         except ValueError:
             raise ConfigError(f"{where}: unknown severity {v!r} (expected CRITICAL/HIGH/MEDIUM/LOW/INFO)") from None
     return out
+
+
+_parse_fail_on = parse_fail_on  # backwards-compatible alias
 
 
 def load_settings(config_path: Path | None, profile: str | None, overrides: dict[str, Any] | None = None) -> Settings:

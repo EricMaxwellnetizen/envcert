@@ -4,6 +4,18 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-23
+
+### Added
+- Inter-procedural validation in EC054's data-flow analysis: reward
+  flows passing through a local helper that itself compares/asserts are
+  recognised as validated (grade.py-style graders no longer WARN).
+- EC056 covers JavaScript/TypeScript verifiers (`eval(`, `new Function`,
+  `vm.runIn*`, template-literal `exec(`).
+- Documentation site (MkDocs Material, GitHub Pages workflow), PyPI/CI
+  badges, real generated demo reports under `docs/demo/`, and six
+  roadmap issues filed on GitHub (#1–#6).
+
 ## [0.4.0] - 2026-11-22
 
 ### Added

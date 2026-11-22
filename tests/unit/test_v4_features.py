@@ -209,10 +209,10 @@ def test_ec054_parse_only_helper_is_still_self_grading(task_factory):
     assert statuses(report, "EC054") == ["FAIL"]
 
 
-def test_ec054_grading_helper_result_is_warn_not_fail(task_factory):
+def test_ec054_grading_helper_result_is_validated(task_factory):
     # automationbench-style: the reward is a float of a local grading
-    # helper's verdict over agent state.  The helper may compare (which
-    # intra-procedural analysis cannot see), so this is review-level WARN.
+    # helper's verdict over agent state, and the helper itself compares
+    # against expected state -- inter-procedural validation, not trust.
     task = _task_with_verifier(task_factory, (
         "import json\n"
         "def task_completed_correctly(state):\n"
@@ -223,7 +223,7 @@ def test_ec054_grading_helper_result_is_warn_not_fail(task_factory):
         "    return reward\n"
     ))
     report = run_checks(task, load_settings(None, None, None))
-    assert statuses(report, "EC054") == ["WARN"]
+    assert statuses(report, "EC054") == ["PASS"]
 
 
 def test_ec011_no_build_context_no_leak_claim(task_factory):
@@ -258,6 +258,13 @@ def test_ec011_narrow_copies_do_not_include_solution_material(task_factory):
     root2 = make_task(pathlib.Path(tempfile.mkdtemp()), files)
     report = run_checks(root2, load_settings(None, None, None))
     assert statuses(report, "EC011") == ["FAIL"]
+
+
+def test_ec056_flags_js_eval_in_verifier(task_factory):
+    files = dict(BASIC)
+    files["tests/verify.js"] = "const out = eval(process.env.AGENT_CODE);\nconsole.log(out);\n"
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    assert statuses(report, "EC056") == ["WARN"]
 
 
 def test_ec056_flags_eval_and_pickle_in_verifier(task_factory):

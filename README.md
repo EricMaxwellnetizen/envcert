@@ -1,5 +1,9 @@
 # EnvCert
 
+[![PyPI](https://img.shields.io/pypi/v/envcert.svg)](https://pypi.org/project/envcert/)
+[![CI](https://github.com/EricMaxwellnetizen/envcert/actions/workflows/ci.yml/badge.svg)](https://github.com/EricMaxwellnetizen/envcert/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://ericmaxwellnetizen.github.io/envcert/)
+
 **Integrity verification and evidence for AI training and evaluation environments.**
 
 EnvCert checks whether the thing you measure models with is trustworthy:

@@ -221,12 +221,27 @@ def _tainted_vars(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str],
     return tainted, frozenset(trusted)
 
 
+def _flows_through_validator(node: ast.AST, local_funcs: dict[str, bool],
+                             tainted: set[str], trusted: frozenset[str]) -> bool:
+    """True when agent data passes through a local helper that itself
+    contains comparison/assertion logic before reaching the sink -- the
+    inter-procedural shape of validation (grade.py-style graders)."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            name = _call_name(child)
+            if local_funcs.get(name) and any(_is_source_expr(a, tainted, trusted) for a in child.args):
+                return True
+    return False
+
+
 def _analyse_function(path: str, fn: ast.FunctionDef | ast.AsyncFunctionDef,
-                      out: Analysis) -> None:
+                      out: Analysis, local_funcs: dict[str, bool] | None = None) -> None:
+    local_funcs = local_funcs or {}
     tainted, trusted = _tainted_vars(fn)
     validated = _function_validates(fn, tainted)
     for node in ast.walk(fn):
         if isinstance(node, ast.Return) and node.value is not None and _is_source_expr(node.value, tainted, trusted):
+            hit_validated = validated or _flows_through_validator(node.value, local_funcs, tainted, trusted)
             numeric = _contains_numeric_parse(node.value, tainted, trusted)
             # Data-loading helpers return agent data for later comparison;
             # they are not reward sinks.  A return is a self-report sink
@@ -238,7 +253,7 @@ def _analyse_function(path: str, fn: ast.FunctionDef | ast.AsyncFunctionDef,
             out.self_reported.append(FlowHit(
                 path=path, line=node.lineno, kind="return-agent-controlled",
                 detail=f"{fn.name}() returns a value derived from agent-controlled input",
-                function=fn.name, numeric_parse=numeric, validated=validated, direct_parse=_contains_direct_parse(node.value, tainted, trusted)))
+                function=fn.name, numeric_parse=numeric, validated=hit_validated, direct_parse=_contains_direct_parse(node.value, tainted, trusted)))
         elif isinstance(node, ast.Assign):
             names = [n.id for targets in node.targets for n in ast.walk(targets) if isinstance(n, ast.Name)]
             if any(any(w in name.lower() for w in REWARD_WORDS) for name in names) \
@@ -246,7 +261,9 @@ def _analyse_function(path: str, fn: ast.FunctionDef | ast.AsyncFunctionDef,
                 out.self_reported.append(FlowHit(
                     path=path, line=node.lineno, kind="assign-agent-controlled-reward",
                     detail=f"reward variable assigned from agent-controlled input in {fn.name}()",
-                    function=fn.name, numeric_parse=_contains_numeric_parse(node.value, tainted, trusted), validated=validated, direct_parse=_contains_direct_parse(node.value, tainted, trusted)))
+                    function=fn.name, numeric_parse=_contains_numeric_parse(node.value, tainted, trusted),
+                    validated=validated or _flows_through_validator(node.value, local_funcs, tainted, trusted),
+                    direct_parse=_contains_direct_parse(node.value, tainted, trusted)))
         elif isinstance(node, ast.Call):
             name = _call_name(node)
             if name in ("write", "writelines") and node.args and _is_source_expr(node.args[0], tainted, trusted):
@@ -298,7 +315,11 @@ def analyse_python(files: list[tuple[str, str]]) -> Analysis:
             continue
         out.files_parsed.append(path)
         _dangerous_hits(path, tree, out)
+        local_funcs: dict[str, bool] = {}
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                _analyse_function(path, node, out)
+                local_funcs[node.name] = any(isinstance(n, (ast.Compare, ast.Assert)) for n in ast.walk(node))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _analyse_function(path, node, out, local_funcs)
     return out

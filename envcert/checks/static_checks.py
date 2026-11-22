@@ -1076,6 +1076,9 @@ def check_verifier_dangerous_primitives(c: CheckContext) -> list:
             # and similar fixed-path sourcing are normal verifier setup.
             if re.search(r"\beval\s+[\"']?\$|\beval\s+\$\(|\beval\s+`|\b(?:ba)?sh\s+-c\s+[\"'][^\"']*\$", line):
                 shell_hits.append({"path": f, "line": i, "text": line.strip()[:140]})
+            if f.endswith((".js", ".mjs", ".cjs", ".ts")) and re.search(
+                    r"\beval\s*\(|new\s+Function\s*\(|vm\.runIn|exec\s*\(\s*`|execSync\s*\(\s*`", line):
+                shell_hits.append({"path": f, "line": i, "text": line.strip()[:140]})
     hits = analysis.dangerous
     if hits:
         h = hits[0]

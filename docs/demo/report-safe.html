@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnvCert report — envcert/hello-file</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:2rem auto;max-width:62rem;padding:0 1rem;color:#1f2328}
+h1{font-size:1.4rem} table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{border:1px solid #d0d7de;padding:.4rem .5rem;text-align:left;vertical-align:top}
+th{background:#f6f8fa} code{background:#f6f8fa;padding:.1rem .3rem;border-radius:4px}
+.meta{color:#57606a} .verdict{font-weight:700}
+</style></head><body>
+<h1>EnvCert 0.4.1 — <span class="verdict">PASSED</span></h1>
+<p class="meta">Task <code>envcert/hello-file</code> · adapter harbor ·
+profile harbor · execution none<br>
+Bundle sha256 <code>47ac81543576f2c73073107368dd2fedbfbb3f7cee7f3d34dfa3766e7d32e986</code> · schema 1.0.0</p>
+<p>43 findings · {&#x27;PASS&#x27;: 25, &#x27;NOT_APPLICABLE&#x27;: 8, &#x27;NOT_RUN&#x27;: 10} · fail-on: CRITICAL, HIGH</p>
+<table><thead><tr><th>Status</th><th>Check</th><th>Severity</th><th>Finding</th></tr></thead>
+<tbody>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC001</td><td>INFO</td><td><strong>Task structure is recognisable and complete</strong><br>Recognised harbor task &#x27;envcert/hello-file&#x27; with required components present.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC002</td><td>INFO</td><td><strong>Instruction is present and non-trivial</strong><br>instruction.md present (141 chars, no placeholders).<br><code>instruction.md</code></td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC003</td><td>INFO</td><td><strong>Reference solution is present (or its absence is explicit)</strong><br>Reference solution present: solution/solve.sh</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC010</td><td>INFO</td><td><strong>No exposed version-control metadata in agent-visible paths</strong><br>No .git metadata found in the task bundle.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC011</td><td>INFO</td><td><strong>Reference solution is not copied into the agent environment</strong><br>Reference solution exists outside the build context and no COPY/ADD includes solution material in the image.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC012</td><td>INFO</td><td><strong>No known answer / gold files in agent-visible paths</strong><br>No answer/gold/expected-output filenames in agent-visible areas (outside tests/ and solution/).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC013</td><td>INFO</td><td><strong>No hard-coded secrets or credentials in task material</strong><br>No hard-coded credential patterns found in text files.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC014</td><td>INFO</td><td><strong>Instruction does not disclose solution or hidden-test content</strong><br>No verbatim solution lines (&gt;=40 chars) found in instruction.md.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC020</td><td>INFO</td><td><strong>Verifier runs separated from the agent where the framework supports it</strong><br>Verifier is configured for a separate environment (verifier.environment_mode=&#x27;separate&#x27;), so agent filesystem state does not carry into verification except via declared artifacts.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC021</td><td>INFO</td><td><strong>No agent-controlled Python import shadowing on verifier paths</strong><br>No sitecustomize/usercustomize/conftest/pytest-config shadowing files in agent-visible areas (such files under tests/ are verifier-owned and expected).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC022</td><td>INFO</td><td><strong>No executable shadowing of verifier tooling</strong><br>No tool-named executables (pytest/python/pip/test.sh) in agent-visible areas or copied into bin directories.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC023</td><td>INFO</td><td><strong>Verifier/test directories are not made world-writable in the image</strong><br>No world-writable declarations on verifier/test/system paths (agent-workspace chmod is the normal artifact channel).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC024</td><td>INFO</td><td><strong>No shared writable mounts or Docker socket exposure</strong><br>No docker.sock mounts, privileged mode or SYS_ADMIN in task configuration files.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC030</td><td>INFO</td><td><strong>Base images are pinned to a digest or specific tag</strong><br>All base images are pinned to sha256 digests.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC031</td><td>INFO</td><td><strong>Container does not default to root without justification</strong><br>Final USER is non-root (&#x27;agent&#x27;).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC032</td><td>INFO</td><td><strong>No dangerous Dockerfile patterns (remote ADD, curl|sh, privileged hints)</strong><br>No remote ADD, pipe-to-shell or unauthenticated package installs in the Dockerfile.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC033</td><td>INFO</td><td><strong>Network policy is declared and not silently unrestricted</strong><br>Network mode is &#x27;no-network&#x27; for the agent environment.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC040</td><td>INFO</td><td><strong>Python dependencies are pinned / locked</strong><br>No unpinned pip/requirements entries detected.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC041</td><td>INFO</td><td><strong>External downloads at build/run time are pinned or checksummed</strong><br>No unpinned git clones or unverified downloads detected.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC050</td><td>INFO</td><td><strong>Verifier exists and is non-empty</strong><br>Verifier present and non-empty: tests/test.sh</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC051</td><td>INFO</td><td><strong>Verifier produces a reward in the framework&#x27;s expected location</strong><br>Verifier code writes the Harbor reward file (found in tests/test.sh).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC052</td><td>INFO</td><td><strong>No unconditional-success path in the verifier</strong><br>No unconditional-success patterns (bare echo 1, assert True only, success-without-assert) detected in the verifier.</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC053</td><td>INFO</td><td><strong>Verifier contains substantive assertions</strong><br>Verifier contains substantive check signals (python asserts: 4, shell comparisons: 3, test functions: 2).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC054</td><td>INFO</td><td><strong>Verifier does not trust agent-controlled result files without validation</strong><br>Verifier does not derive its reward from unvalidated agent-controlled content (AST data-flow over 1 Python verifier file(s)).</td></tr>
+<tr><td style='color:#137333;font-weight:600'>PASS</td><td>EC056</td><td>INFO</td><td><strong>Verifier does not execute or unsafely deserialise agent-influenced data</strong><br>No eval/exec, unsafe deserialisation or shell=True primitives found in the verifier.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC060</td><td>INFO</td><td><strong>Reference (gold) solution passes the verifier</strong><br>Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC061</td><td>INFO</td><td><strong>Negative control (no-op/empty) is rejected by the verifier</strong><br>Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC062</td><td>INFO</td><td><strong>Verifier outcome is repeatable across repetitions</strong><br>Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC063</td><td>INFO</td><td><strong>Mutation testing: verifier rejects mutated (incorrect) solutions</strong><br>Mutation testing is opt-in: re-run with --mutation (and --execution local-python).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC064</td><td>INFO</td><td><strong>Shell-solution mutation: verifier rejects mutated reference solutions (docker)</strong><br>Shell-solution mutation is opt-in: re-run with --mutation and --execution docker.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC065</td><td>INFO</td><td><strong>NeMo verifier probing with mutated inputs (gold/wrong/swapped answers)</strong><br>Dynamic probing is opt-in: re-run with --execution local-python (trusted verifier code only).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC066</td><td>INFO</td><td><strong>Deterministic cheat-agent battery is rejected by the verifier</strong><br>Cheat-agent battery is opt-in: re-run with --execution docker or --execution local-python.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC070</td><td>INFO</td><td><strong>Hadolint Dockerfile lint (external companion)</strong><br>External companion tools are opt-in: re-run with --external-tools (and install hadolint).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC071</td><td>INFO</td><td><strong>Trivy filesystem vulnerability scan (external companion)</strong><br>External companion tools are opt-in: re-run with --external-tools (and install trivy).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_RUN</td><td>EC072</td><td>INFO</td><td><strong>Semgrep scan (external companion, task-provided rules only)</strong><br>External companion tools are opt-in: re-run with --external-tools (and install semgrep).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC004</td><td>INFO</td><td><strong>Multi-step tasks: every step is complete (instruction, verifier, solution)</strong><br>Not a multi-step Harbor task (no steps/ directory).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC055</td><td>INFO</td><td><strong>Inspect scorer is not trivially satisfiable</strong><br>Scorer-strength patterns are Inspect-specific; other frameworks are covered by EC052/EC053.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC080</td><td>INFO</td><td><strong>Dataset answers are not embedded in agent-visible prompts</strong><br>Dataset leakage checks require the dataset adapter (a .jsonl/.json/.csv file).</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC081</td><td>INFO</td><td><strong>Dataset has no duplicate or near-duplicate rows</strong><br>Dataset duplicate checks require the dataset adapter.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC082</td><td>INFO</td><td><strong>Dataset splits do not share prompts (no train/test overlap)</strong><br>Dataset split checks require the dataset adapter.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC083</td><td>INFO</td><td><strong>Dataset labels are not degenerate</strong><br>Dataset label checks require the dataset adapter.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC084</td><td>INFO</td><td><strong>Dataset rows parse and carry their promised fields</strong><br>Dataset row checks require the dataset adapter.</td></tr>
+<tr><td style='color:#5f6368;font-weight:600'>NOT_APPLICABLE</td><td>EC085</td><td>INFO</td><td><strong>Dataset grading specifications are consistent (FAIL_TO_PASS/PASS_TO_PASS style)</strong><br>Dataset grading-spec checks require the dataset adapter.</td></tr>
+</tbody></table>
+<p class="meta">EnvCert reports evidence about checked properties; it is not a certification that an environment is unhackable. Verify this report with <code>envcert verify</code>.</p>
+</body></html>

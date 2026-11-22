@@ -34,11 +34,19 @@ class DockerRunner(Runner):
             return RunnerInfo(self.name, False, "docker executable not found on PATH",
                               "docker (shared-kernel container); not used")
         try:
-            proc = _run([exe, "version", "--format", "{{.Server.Version}}"], 15)
+            proc = _run([exe, "version", "--format", "{{.Server.Os}} {{.Server.Version}}"], 15)
             if proc.returncode != 0:
                 return RunnerInfo(self.name, False, f"docker daemon unavailable: {(proc.stderr or proc.stdout).strip()[:200]}",
                                   "docker (shared-kernel container); not used")
-            return RunnerInfo(self.name, True, f"docker daemon {proc.stdout.strip()}",
+            server_os, _, server_version = proc.stdout.strip().partition(" ")
+            if server_os and server_os != "linux":
+                # e.g. GitHub windows-latest runners expose a Windows
+                # containers engine: present, but it cannot build or run
+                # the Linux task images this runner exists for.
+                return RunnerInfo(self.name, False,
+                                  f"docker daemon is a {server_os} containers engine; EnvCert's restricted runner needs Linux containers",
+                                  "docker (shared-kernel container); not used")
+            return RunnerInfo(self.name, True, f"docker daemon {server_version or proc.stdout.strip()} (linux)",
                               "docker container: cap-drop ALL, no-new-privileges, resource limits, no docker.sock mount, harness runs as root inside the disposable container to create /logs and /tests (as Harbor does); shared host kernel — not a VM")
         except Exception as exc:  # noqa: BLE001
             return RunnerInfo(self.name, False, f"docker probe failed: {exc}", "docker; not used")

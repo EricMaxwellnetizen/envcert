@@ -103,6 +103,17 @@ def test_parquet_without_pyarrow_is_reported(tmp_path):
         assert statuses["EC084"] == "WARN"
 
 
+def test_docker_runner_rejects_windows_containers_engine(monkeypatch):
+    def fake_run(cmd, timeout):
+        return subprocess.CompletedProcess(cmd, 0, stdout="windows 29.0.0\n", stderr="")
+
+    monkeypatch.setattr(docker_runner, "_run", fake_run)
+    monkeypatch.setattr(docker_runner.shutil, "which", lambda _: "docker")
+    info = docker_runner.DockerRunner().info()
+    assert info.available is False
+    assert "Linux containers" in info.reason
+
+
 def test_external_runner_with_fake_provider(tmp_path):
     provider = tmp_path / "provider.py"
     provider.write_text(
@@ -149,7 +160,7 @@ def test_docker_runner_with_fake_docker(monkeypatch, tmp_path):
     def fake_run(cmd, timeout):
         calls.append(cmd)
         if "version" in cmd:
-            return subprocess.CompletedProcess(cmd, 0, stdout="29.0.0\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="linux 29.0.0\n", stderr="")
         if "build" in cmd:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if "inspect" in cmd:

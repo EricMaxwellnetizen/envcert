@@ -4,6 +4,17 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-23
+
+### Fixed
+- EC054: validation assigned to a variable (`reward = grade(state)`)
+  now propagates to its return/sink instead of producing a second,
+  unvalidated hit (CI caught this on all platforms).
+- Docker runner availability now requires a Linux containers engine:
+  Windows-containers daemons (GitHub windows-latest) report themselves
+  unavailable, so live Docker tests skip instead of failing with ERROR.
+- Docs workflow action references corrected (Pages now deploys).
+
 ## [0.4.1] - 2026-11-23
 
 ### Added

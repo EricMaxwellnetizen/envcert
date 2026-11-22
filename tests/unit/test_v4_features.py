@@ -250,8 +250,10 @@ def test_ec011_narrow_copies_do_not_include_solution_material(task_factory):
     files["environment/Dockerfile"] = (
         "FROM python:3.12-slim@sha256:" + "a" * 64 + "\nWORKDIR /root\n"
         "COPY scripts/ /root/scripts/\nUSER nobody\n")
+    import pathlib
+    import tempfile
+
     from tests.conftest import make_task
-    import tempfile, pathlib
 
     root2 = make_task(pathlib.Path(tempfile.mkdtemp()), files)
     report = run_checks(root2, load_settings(None, None, None))

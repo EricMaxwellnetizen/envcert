@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install mkdocs-material
       - run: mkdocs build --strict
-      - uses: actions/upload-pages-artifact@56afc609e74202658c7cba35f27399b3aabbfa75 # v3.0.1
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: site
   deploy:
@@ -32,4 +32,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@d6db90164ac5b86f2b6aed7feb72d567a1b2fc45 # v4.0.5
+        uses: actions/deploy-pages@v4

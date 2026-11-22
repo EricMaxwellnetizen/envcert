@@ -239,9 +239,17 @@ def _analyse_function(path: str, fn: ast.FunctionDef | ast.AsyncFunctionDef,
     local_funcs = local_funcs or {}
     tainted, trusted = _tainted_vars(fn)
     validated = _function_validates(fn, tainted)
+    # Variables assigned from a validating flow carry that validation to
+    # their sinks (`reward = grade(state); return reward`).
+    validated_vars: set[str] = set()
+    for assign in (n for n in ast.walk(fn) if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None):
+        if _flows_through_validator(assign.value, local_funcs, tainted, trusted):  # type: ignore[arg-type]
+            for target in (assign.targets if isinstance(assign, ast.Assign) else [assign.target]):
+                validated_vars.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
     for node in ast.walk(fn):
         if isinstance(node, ast.Return) and node.value is not None and _is_source_expr(node.value, tainted, trusted):
-            hit_validated = validated or _flows_through_validator(node.value, local_funcs, tainted, trusted)
+            hit_validated = validated or _flows_through_validator(node.value, local_funcs, tainted, trusted) \
+                or any(isinstance(n, ast.Name) and n.id in validated_vars for n in ast.walk(node.value))
             numeric = _contains_numeric_parse(node.value, tainted, trusted)
             # Data-loading helpers return agent data for later comparison;
             # they are not reward sinks.  A return is a self-report sink

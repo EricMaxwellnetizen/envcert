@@ -36,12 +36,23 @@ class Dockerfile:
         return "\n".join(f"{i.name} {i.args}" for i in self.instructions)
 
 
+HEREDOC_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
 def parse_dockerfile(text: str) -> Dockerfile:
     df = Dockerfile()
     logical: list[tuple[int, str]] = []
     buf, start = "", 0
+    heredoc_end: str | None = None
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.rstrip()
+        if heredoc_end is not None:
+            # Heredoc bodies are file content (often embedded Python/shell),
+            # never Dockerfile instructions: `from pathlib import Path`
+            # must not become a FROM instruction.
+            if line.strip() == heredoc_end:
+                heredoc_end = None
+            continue
         if not buf:
             start = lineno
             if not line.strip() or line.lstrip().startswith("#"):
@@ -51,6 +62,9 @@ def parse_dockerfile(text: str) -> Dockerfile:
             continue
         buf += line
         logical.append((start, buf.strip()))
+        marker = HEREDOC_RE.search(buf)
+        if marker:
+            heredoc_end = marker.group(1)
         buf = ""
     if buf.strip():
         logical.append((start, buf.strip()))

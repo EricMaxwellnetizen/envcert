@@ -2,21 +2,26 @@
 
 **Integrity verification and evidence for AI training and evaluation environments.**
 
-EnvCert checks whether an AI evaluation environment — a task bundle with an
-instruction, a Docker environment, a reference solution and a verifier — is
-actually trustworthy: Is the answer leaked to the agent? Can agent-controlled
-files influence the verifier? Would an incorrect solution pass? Is the build
-reproducible, the network policy declared, the evidence reproducible?
+EnvCert checks whether the thing you measure models with is trustworthy:
+a task bundle (instruction, Docker environment, reference solution,
+verifier) or the dataset file itself (JSONL/JSON/CSV). Is the answer
+leaked to the agent? Can agent-controlled files influence the verifier?
+Would a *cheating* solution pass? Are train and test rows the same rows?
+Is the build reproducible, the evidence verifiable?
 
 It answers with explicit, deterministic findings (never a single score),
-a schema-versioned JSON report, SARIF for code scanning, and an optional
-digest-bound [in-toto](https://in-toto.io) attestation.
+schema-versioned reports (text/JSON/SARIF/Markdown/HTML), a cheat-agent
+battery that *proves* false passes by execution, deterministic fixes,
+and an optional digest-bound [in-toto](https://in-toto.io) attestation.
 
 EnvCert is **not** a certification authority and never claims an environment
 is unhackable. It is an independent, extensible verification and evidence
 layer — complementary to Harbor / NeMo Gym (which run tasks), BenchJack /
-trustworthy-env (which hunt exploits with AI agents), and Trivy/Hadolint/
-Semgrep (CVE/lint/SAST). See `docs/research/COMPETITIVE_ANALYSIS.md`.
+trustworthy-env (which hunt novel exploits with AI agents), and Trivy/
+Hadolint/Semgrep (CVE/lint/SAST). No LLM, no API key, no account:
+everything above runs offline. See `docs/research/PRODUCT_REVIEW.md`
+for the evidence that this gap is real, and
+`docs/research/COMPETITIVE_ANALYSIS.md` for the feature matrix.
 
 ## Who is it for?
 
@@ -46,15 +51,22 @@ envcert check ./examples/safe-environment
 envcert check ./examples/intentionally-vulnerable-environment   # exit 1: try it
 envcert check ./my-task --format json --output report.json
 envcert check ./my-task --format sarif --output envcert.sarif
+envcert check ./my-task --format markdown --output summary.md    # PR-ready
+envcert check ./my-task --format html --output report.html       # shareable
+envcert check ./data/train.jsonl                                 # dataset files, no bundle needed
+envcert check ./my-task --execution docker                       # gold + no-op + cheat battery
+envcert fix ./my-task                                            # dry-run deterministic fixes
+envcert fix ./my-task --apply
+envcert new ./my-new-task                                        # scaffold that passes check
 envcert verify report.json --task ./my-task
 envcert list-checks
-envcert explain EC011
+envcert explain EC066
 ```
 
 Real output (safe example, abridged):
 
 ```text
-EnvCert 0.1.0  report schema 1.0.0
+EnvCert 0.4.0  report schema 1.0.0
 Task: envcert/hello-file  adapter=harbor  files=8
 Profile: harbor  execution: none  fail_on: CRITICAL, HIGH
 
@@ -64,7 +76,7 @@ Profile: harbor  execution: none  fail_on: CRITICAL, HIGH
 [PASS] EC051 (INFO/PASS) Verifier produces a reward in the framework's expected location
 [SKIP] EC060 (INFO/NOT_RUN) Reference (gold) solution passes the verifier
        Dynamic checks are opt-in: re-run with --execution docker or --execution local-python.
-Summary: 28 findings {'PASS': 24, 'NOT_RUN': 4}
+Summary: 43 findings {'PASS': 25, 'NOT_APPLICABLE': 8, 'NOT_RUN': 10}
 Policy: PASSED (fail_on=CRITICAL, HIGH)
 ```
 
@@ -79,7 +91,7 @@ The intentionally vulnerable example produces (among others):
 
 ## What it checks
 
-33 checks with stable public IDs (full catalog:
+43 checks with stable public IDs (full catalog:
 `docs/architecture/CHECK_CATALOG.md`, or `envcert list-checks -v`):
 
 | Area | Checks | Examples |
@@ -89,9 +101,11 @@ The intentionally vulnerable example produces (among others):
 | Agent/verifier boundary | EC020–EC024 | shared verifier mode, sitecustomize/conftest shadowing, PATH tool shadowing, world-writable paths, docker.sock/privileged |
 | Docker | EC030–EC033 | unpinned base images, root user, remote ADD / curl\|sh, undeclared network policy |
 | Dependencies | EC040–EC041 | unpinned pip deps, unverified downloads |
-| Verifier quality | EC050–EC054 | missing/empty verifier, no reward production, unconditional success, assertion-free tests, self-reported rewards |
+| Verifier quality | EC050–EC056 | missing/empty verifier, no reward production, unconditional success, assertion-free tests, self-reported rewards (AST data-flow), eval/unsafe-deserialisation in the verifier |
+| Dataset integrity | EC080–EC085 | answer embedded in the prompt, duplicate/near-duplicate rows, train/test overlap, degenerate labels, broken rows, inconsistent grading specs |
 | Multi-step | EC004 | per-step instruction/verifier completeness (plus per-step EC002) |
 | Dynamic (opt-in) | EC060–EC062 | gold run, no-op negative control (docker/local/external), repeatability |
+| Cheat battery (opt-in) | EC066 | deterministic cheat agents — stub solution, conftest outcome-faking, forged reward file, verifier tampering — must all be rejected |
 | Mutation (opt-in) | EC063–EC064 | AST mutants of a Python solution; literal mutants of shell solutions under Docker |
 | External companions (opt-in) | EC070–EC072 | Hadolint, Trivy, Semgrep — run only when installed and `--external-tools` is passed |
 
@@ -109,13 +123,30 @@ potential exposure as a confirmed vulnerability.
   **no sandbox** and must only be used on trusted tasks. See
   `docs/guides/DYNAMIC_EXECUTION.md`.
 
-## Dynamic & mutation checks (opt-in)
+## Dynamic, cheat-battery & mutation checks (opt-in)
 
 ```bash
 envcert check ./my-harbor-task --execution docker                 # restricted container run
 envcert check ./examples/python-task --execution local-python --mutation
 # EC060 PASS gold, EC061 PASS no-op rejected, EC062 PASS repeatable, EC063 mutation rejection rate
+# EC066: deterministic cheat agents (stub solution, conftest outcome-faking,
+#        forged reward file, verifier tampering) are played against your
+#        verifier -- a cheat that passes is a proven false pass, not a heuristic.
 ```
+
+## Datasets, fixes and scaffolding
+
+```bash
+envcert check ./train.jsonl            # answers-in-prompts, duplicates, split overlap, degenerate labels
+envcert check ./data/                  # every .jsonl/.json/.csv beneath a directory (train/test aware)
+envcert fix ./my-task                  # dry-run: deterministic, idempotent remediation plan
+envcert fix ./my-task --apply          # write it (.dockerignore, declared policies), then re-check
+envcert new ./my-task --name org/my-task   # a Harbor task scaffolded to pass `envcert check`
+```
+
+Pre-commit: `repo: https://github.com/EricMaxwellnetizen/envcert` with hook
+id `envcert` (tasks) or `envcert-dataset` (data files). Third-party checks
+can register under the `envcert.checks` entry-point group — no fork needed.
 
 ## Reports, verification, attestations
 
@@ -142,7 +173,7 @@ extension are specified in `docs/architecture/REPORT_SCHEMA.md`.
 ## GitHub Actions
 
 ```yaml
-- uses: EricMaxwellnetizen/envcert@v0.3.2   # or @v0 for the latest 0.x
+- uses: EricMaxwellnetizen/envcert@v0.4.0   # or @v0 for the latest 0.x
   with:
     path: ./my-task
     fail-on: critical,high
@@ -164,6 +195,7 @@ input/config · `3` internal/execution error.
 | Generic Docker task bundles (Dockerfile + tests/solution) | Implemented, reduced-confidence heuristics |
 | NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static + EC065 probing; Resources-Server HTTP probing not yet) — `examples/nemo-gym-dataset` |
 | Inspect AI evaluations (@task Python files) | Implemented (static) — `examples/inspect-eval` |
+| Dataset files (`.jsonl` / `.json` / `.csv`, SWE-bench/NeMo/OpenAI-style fields) | Implemented (EC080–EC084) — `envcert check data.jsonl` |
 
 Dynamic execution modes: `docker` (restricted), `local-python` (trusted
 pytest tasks, no sandbox), `external` (your disposable-VM/remote runner via

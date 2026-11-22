@@ -8,8 +8,10 @@ EXAMPLES = pathlib.Path(__file__).resolve().parents[2] / "examples"
 
 
 def test_dynamic_not_run_by_default():
+    from envcert.checks.base import REGISTRY
+
     report = run_checks(EXAMPLES / "python-task", load_settings(None, None, None))
-    dyn = {f["check_id"]: f["status"] for f in report["findings"] if f["check_id"] >= "EC060"}
+    dyn = {f["check_id"]: f["status"] for f in report["findings"] if REGISTRY[f["check_id"]][0].dynamic}
     assert set(dyn.values()) == {"NOT_RUN"}
 
 

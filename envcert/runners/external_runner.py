@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -60,6 +61,17 @@ class ExternalRunner(Runner):
         if not self.command:
             return RunnerInfo(self.name, False,
                               "no external runner command configured (use --runner-command or ENVCERT_RUNNER_COMMAND)",
+                              "external provider (operator-configured); not used")
+        try:
+            argv = split_runner_command(self.command)
+        except ValueError as exc:
+            return RunnerInfo(self.name, False, f"unparseable external runner command: {exc}",
+                              "external provider (operator-configured); not used")
+        if not argv:
+            return RunnerInfo(self.name, False, "empty external runner command",
+                              "external provider (operator-configured); not used")
+        if shutil.which(argv[0]) is None:
+            return RunnerInfo(self.name, False, f"external runner command not found: {argv[0]}",
                               "external provider (operator-configured); not used")
         return RunnerInfo(self.name, True, f"external runner command: {self.command}",
                           "external provider: isolation is whatever the operator's disposable VM/remote sandbox provides — EnvCert cannot vouch for it and records the provider command in the report")

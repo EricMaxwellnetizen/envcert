@@ -77,6 +77,9 @@ def check_gold(c: CheckContext) -> list:
     result, why = _run_variant(c, "gold")
     if result is None:
         return [not_applicable(EC060, f"Gold run not supported here: {why}.")]
+    c.shared["gold_ran"] = True
+    c.shared["gold_reward"] = result.reward
+    c.shared["gold_ok"] = bool(result.ok)
     if result.error and result.reward is None:
         c.shared["gold_execution_error"] = result.error
         return [finding(EC060, Status.ERROR, f"Gold execution failed to run: {result.error}",
@@ -110,6 +113,22 @@ def check_negative_control(c: CheckContext) -> list:
                         f"Negative control could not be evaluated: the gold run failed to execute ({gold_error}). "
                         "A rejected no-op is not evidence when the verifier never ran.",
                         severity=Severity.INFO, evidence={"gold_error": gold_error})]
+    if not c.shared.get("gold_ran"):
+        # Selected without EC060: a rejected no-op is only meaningful when a
+        # correct solution passes, so establish the gold baseline here
+        # instead of trusting that another check ran first.
+        gold, gold_why = _run_variant(c, "gold")
+        if gold is None:
+            return [not_applicable(EC061, f"Negative control not supported here: {gold_why}.")]
+        if gold.error and gold.reward is None:
+            return [finding(EC061, Status.ERROR,
+                            f"Negative control could not be evaluated: the gold run failed to execute ({gold.error}).",
+                            severity=Severity.INFO, evidence={"gold_error": gold.error})]
+        gold_passed = (gold.reward >= 1.0) if gold.reward is not None else bool(gold.ok)
+        if not gold_passed:
+            return [not_applicable(EC061, f"Negative control inconclusive: the gold solution does not pass (reward={gold.reward}), so a rejected no-op proves nothing. Fix EC060 first.")]
+        c.shared["gold_ran"] = True
+        c.shared["gold_reward"] = gold.reward
     # Reward, when present, is authoritative (a docker harness exits 0 even
     # when the reward is 0); only fall back to exit status without a reward.
     noop_passed = (result.reward >= 1.0) if result.reward is not None else result.ok

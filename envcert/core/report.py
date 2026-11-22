@@ -22,6 +22,38 @@ from envcert.core.models import Severity, Status
 SEVERITY_NAMES = [s.value for s in Severity]
 STATUS_NAMES = [s.value for s in Status]
 
+# Check IDs that existed in each released registry.  Reports must account for
+# every check that was available when they were produced: a check that did not
+# run belongs in checks_not_executed, never in an implicit gap.  New reports
+# carry checks_available so future versions do not need this table.
+KNOWN_REGISTRY_SNAPSHOTS: dict[tuple[int, int], frozenset[str]] = {
+    (0, 1): frozenset(
+        "EC001 EC002 EC003 EC010 EC011 EC012 EC013 EC014 "
+        "EC020 EC021 EC022 EC023 EC024 EC030 EC031 EC032 EC033 "
+        "EC040 EC041 EC050 EC051 EC052 EC053 EC054 "
+        "EC060 EC061 EC062 EC063".split()
+    ),
+    (0, 2): frozenset(
+        "EC001 EC002 EC003 EC004 EC010 EC011 EC012 EC013 EC014 "
+        "EC020 EC021 EC022 EC023 EC024 EC030 EC031 EC032 EC033 "
+        "EC040 EC041 EC050 EC051 EC052 EC053 EC054 "
+        "EC060 EC061 EC062 EC063 EC064 EC070 EC071 EC072".split()
+    ),
+    (0, 3): frozenset(
+        "EC001 EC002 EC003 EC004 EC010 EC011 EC012 EC013 EC014 "
+        "EC020 EC021 EC022 EC023 EC024 EC030 EC031 EC032 EC033 "
+        "EC040 EC041 EC050 EC051 EC052 EC053 EC054 EC055 "
+        "EC060 EC061 EC062 EC063 EC064 EC065 EC070 EC071 EC072".split()
+    ),
+    (0, 4): frozenset(
+        "EC001 EC002 EC003 EC004 EC010 EC011 EC012 EC013 EC014 "
+        "EC020 EC021 EC022 EC023 EC024 EC030 EC031 EC032 EC033 "
+        "EC040 EC041 EC050 EC051 EC052 EC053 EC054 EC055 EC056 "
+        "EC060 EC061 EC062 EC063 EC064 EC065 EC066 EC070 EC071 EC072 "
+        "EC080 EC081 EC082 EC083 EC084 EC085".split()
+    ),
+}
+
 # Evidence fields that legitimately change between otherwise identical runs.
 # They are ignored when fingerprinting a finding for baseline suppression so a
 # stable static finding can be suppressed without hiding a new issue.
@@ -55,13 +87,42 @@ def finding_fingerprint(finding: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _version_at_least(version: Any, minimum: tuple[int, int]) -> bool:
-    """True when the report's envcert_version is >= minimum (e.g. (0, 3))."""
+def version_tuple(version: Any) -> tuple[int, ...]:
+    """Parse a dotted version into integers; empty tuple when unparseable."""
     try:
-        parts = str(version).split(".")
-        return (int(parts[0]), int(parts[1])) >= minimum
-    except (AttributeError, IndexError, ValueError):
+        parts = tuple(int(part) for part in str(version).split("."))
+    except (AttributeError, TypeError, ValueError):
+        return ()
+    return parts
+
+
+def version_at_least(version: Any, minimum: tuple[int, ...]) -> bool:
+    """True when the report's envcert_version is >= minimum (e.g. (0, 3, 2))."""
+    parts = version_tuple(version)
+    if not parts:
         return False
+    width = max(len(parts), len(minimum))
+    left = parts + (0,) * (width - len(parts))
+    right = tuple(minimum) + (0,) * (width - len(minimum))
+    return left >= right
+
+
+_version_at_least = version_at_least  # backwards-compatible internal alias
+
+
+def registry_snapshot(report: dict[str, Any]) -> frozenset[str] | None:
+    """The check registry the report claims to have run against.
+
+    Newer reports record `checks_available` explicitly; older reports are
+    mapped to the registry snapshot of their EnvCert minor version.
+    """
+    available = report.get("checks_available")
+    if isinstance(available, list) and all(isinstance(item, str) for item in available):
+        return frozenset(available)
+    parts = version_tuple(report.get("envcert_version"))
+    if len(parts) < 2:
+        return None
+    return KNOWN_REGISTRY_SNAPSHOTS.get((parts[0], parts[1]))
 
 
 def _severity_set(value: Any) -> set[str] | None:
@@ -193,6 +254,7 @@ def validate_report_consistency(report: dict[str, Any]) -> list[str]:
     executed = report.get("checks_executed")
     if not isinstance(executed, list) or not all(isinstance(x, str) for x in executed):
         problems.append("checks_executed is not a list of check IDs")
+        executed = None
     else:
         if not executed:
             problems.append("checks_executed is empty; a report with no executed checks cannot support a passing policy")
@@ -203,11 +265,69 @@ def validate_report_consistency(report: dict[str, Any]) -> list[str]:
         unexecuted = sorted(finding_ids - set(executed))
         if unexecuted:
             problems.append(f"findings reference checks not listed in checks_executed: {unexecuted}")
+
     not_executed = report.get("checks_not_executed")
-    if isinstance(not_executed, list) and isinstance(executed, list):
+    if "checks_not_executed" not in report:
+        if modern:
+            problems.append("checks_not_executed is missing")
+        not_executed = None
+    elif not isinstance(not_executed, list) or not all(isinstance(x, str) for x in not_executed):
+        problems.append("checks_not_executed is not a list of check IDs")
+        not_executed = None
+    else:
+        duplicates = sorted({x for x in not_executed if not_executed.count(x) > 1})
+        if duplicates:
+            problems.append(f"checks_not_executed contains duplicates: {duplicates}")
+    if isinstance(executed, list) and isinstance(not_executed, list):
         overlap = sorted(set(executed) & set(not_executed))
         if overlap:
             problems.append(f"checks are listed as both executed and not executed: {overlap}")
+
+    # A passing report must account for every check that existed when it was
+    # produced.  Without this, a report can silently omit checks from both
+    # lists and still look internally consistent.  New reports record
+    # checks_available; older ones map to the registry snapshot of their
+    # EnvCert minor version.
+    available = report.get("checks_available")
+    expected_registry: frozenset[str] | None = None
+    parts = version_tuple(report.get("envcert_version"))
+    known_registry = KNOWN_REGISTRY_SNAPSHOTS.get((parts[0], parts[1])) if len(parts) >= 2 else None
+    if available is not None:
+        if not isinstance(available, list) or not all(isinstance(x, str) for x in available):
+            problems.append("checks_available is not a list of check IDs")
+        else:
+            expected_registry = frozenset(available)
+            if len(expected_registry) != len(available):
+                problems.append("checks_available contains duplicates")
+            if known_registry is not None:
+                missing_available = sorted(known_registry - expected_registry)
+                extra_available = sorted(expected_registry - known_registry)
+                if missing_available:
+                    problems.append(
+                        "checks_available omits checks known to exist in this EnvCert version: "
+                        f"{missing_available}"
+                    )
+                if extra_available:
+                    problems.append(
+                        "checks_available lists checks unknown to this EnvCert version: "
+                        f"{extra_available}"
+                    )
+    elif modern:
+        expected_registry = known_registry
+    if isinstance(executed, list) and isinstance(not_executed, list) and expected_registry is not None:
+        union = set(executed) | set(not_executed)
+        missing = sorted(expected_registry - union)
+        extra = sorted(union - expected_registry)
+        if missing:
+            problems.append(
+                "checks_not_executed does not account for checks available in this EnvCert version: "
+                f"{missing}"
+            )
+        if extra:
+            problems.append(
+                "report lists checks that were not available in its EnvCert version: "
+                f"{extra}"
+            )
 
     return problems
 

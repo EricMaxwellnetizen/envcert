@@ -10,7 +10,7 @@
     "EC020": "WARN",
     "EC021": "WARN",
     "EC022": "WARN",
-    "EC023": "WARN",
+    "EC023": "PASS",
     "EC030": "WARN",
     "EC032": "WARN",
     "EC040": "WARN",

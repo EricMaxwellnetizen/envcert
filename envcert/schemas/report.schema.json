@@ -15,7 +15,7 @@
       "properties": {
         "task_name": {"type": "string"},
         "task_path": {"type": "string"},
-        "adapter": {"type": "string", "enum": ["harbor", "generic", "nemo-gym", "inspect"]},
+        "adapter": {"type": "string", "enum": ["harbor", "generic", "nemo-gym", "inspect", "dataset"]},
         "bundle_digest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "file_count": {"type": "integer", "minimum": 0},
         "verifier_digest_sha256": {"type": ["string", "null"]},
@@ -26,8 +26,9 @@
       "additionalProperties": true
     },
     "execution": {"type": "object", "additionalProperties": true},
+    "checks_available": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
     "checks_executed": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
-    "checks_not_executed": {"type": "array", "items": {"type": "string"}},
+    "checks_not_executed": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
     "findings": {
       "type": "array",
       "items": {

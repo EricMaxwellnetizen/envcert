@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -11,20 +12,26 @@ from envcert.attestations.intoto import (
     cosign_attest_image,
     cosign_verify_attestation,
     cosign_verify_blob,
+    cosign_verify_dsse,
     dsse_envelope_unsigned,
+    sign_dsse_with_cosign,
     sign_with_cosign,
     verify_statement_local,
 )
 from envcert.checks.base import REGISTRY
 from envcert.core.config import PROFILES, load_settings
 from envcert.core.engine import run_checks
-from envcert.core.errors import EnvCertError
+from envcert.core.errors import ConfigError, EnvCertError, InvalidInputError
+from envcert.core.images import parse_image_digest
+from envcert.core.json_schema import validate as validate_json_schema
 from envcert.core.report import (
     suppressed_findings,
     validate_baseline_suppression,
     validate_report_consistency,
 )
-from envcert.core.rollup import rollup_to_text, run_dataset_rollup
+from envcert.core.rollup import rollup_to_markdown, rollup_to_text, run_dataset_rollup
+from envcert.reports.html import to_html
+from envcert.reports.markdown import to_markdown
 from envcert.reports.sarif import to_sarif
 from envcert.reports.text import to_text
 
@@ -39,20 +46,73 @@ def _schema() -> dict:
 
 
 def validate_report(report: dict) -> list[str]:
-    """Validate against the published JSON Schema when jsonschema is installed;
-    otherwise fall back to required-field checks (never silently pass)."""
+    """Validate against the published JSON Schema.
+
+    The default install has no third-party dependencies, so the stdlib
+    fallback implements the schema keywords used by the bundled schema rather
+    than checking only a few top-level keys.  Both paths must reject the same
+    structurally invalid reports.
+    """
+    if not isinstance(report, dict):
+        return ["report root is not a JSON object"]
     try:
         import jsonschema  # type: ignore
     except ImportError:
-        problems = []
-        for key in ("schema_version", "envcert_version", "environment", "execution", "findings", "policy", "limitations"):
-            if key not in report:
-                problems.append(f"missing required field: {key}")
-        if report.get("schema_version") != "1.0.0":
-            problems.append(f"unsupported schema_version: {report.get('schema_version')!r}")
-        return problems
+        try:
+            return validate_json_schema(report, _schema())
+        except Exception as exc:  # noqa: BLE001 - a missing/broken schema must not pass
+            return [f"cannot load the report schema: {type(exc).__name__}: {exc}"]
     validator = jsonschema.Draft202012Validator(_schema())
     return [f"{'/'.join(str(p) for p in e.absolute_path) or '<root>'}: {e.message}" for e in validator.iter_errors(report)]
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Write an output file, turning filesystem errors into exit-code-2 input errors."""
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise InvalidInputError(f"cannot write {path}: {exc}") from exc
+
+
+def _report_problems(report: dict) -> list[str]:
+    """Schema + consistency problems, without repeating the same message."""
+    problems = validate_report(report) + validate_report_consistency(report)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for problem in problems:
+        if problem not in seen:
+            seen.add(problem)
+            unique.append(problem)
+    return unique
+
+
+def _watch_check(args, task: Path, settings) -> int:
+    """Re-run the check when the bundle digest changes (Ctrl-C to stop)."""
+    import time
+
+    interval = max(1, int(getattr(args, "watch_interval", 5) or 5))
+    iterations = int(getattr(args, "watch_iterations", 0) or 0)
+    last_digest: str | None = None
+    rc = EXIT_OK
+    run = 0
+    print(f"watching {task} every {interval}s (Ctrl-C to stop)")
+    try:
+        while True:
+            run += 1
+            report = run_checks(task, settings, adapter_name=args.adapter)
+            digest = (report.get("environment") or {}).get("bundle_digest_sha256")
+            rc = EXIT_OK if report["policy"]["passed"] else EXIT_POLICY
+            if digest != last_digest:
+                print(to_text(report), end="")
+                last_digest = digest
+            else:
+                print(f"[watch] no change (digest {str(digest)[:12]}…), policy {'PASSED' if rc == 0 else 'FAILED'}")
+            if iterations and run >= iterations:
+                return rc
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print("\nwatch stopped")
+        return rc
 
 
 def cmd_check(args) -> int:
@@ -60,30 +120,44 @@ def cmd_check(args) -> int:
     if not task.exists():
         print(f"error: task path does not exist: {task}", file=sys.stderr)
         return EXIT_INVALID
-    if not task.is_dir():
-        print(f"error: task path is not a directory: {task}", file=sys.stderr)
+    if task.is_file() and task.suffix.lower() not in (".jsonl", ".json", ".csv", ".parquet"):
+        print(f"error: task path is not a directory (single-file input is supported for dataset files .jsonl/.json/.csv/.parquet): {task}", file=sys.stderr)
         return EXIT_INVALID
     config_path = Path(args.config) if args.config else (task / "envcert.toml" if (task / "envcert.toml").is_file() else None)
     settings = load_settings(config_path, args.profile, {
         "fail_on": [s.strip() for s in args.fail_on.split(",")] if args.fail_on else None,
         "execution": args.execution, "enable": args.enable, "disable": args.disable,
         "repetitions": args.repetitions, "mutation": args.mutation,
+        "max_mutants": getattr(args, "max_mutants", None),
         "image": getattr(args, "image", None), "image_digest": getattr(args, "image_digest", None),
         "runner_command": getattr(args, "runner_command", None),
         "external_tools": getattr(args, "external_tools", False),
         "baseline": getattr(args, "baseline", None),
     })
+    if getattr(args, "watch", False):
+        if getattr(args, "dataset", False):
+            print("error: --watch is per-task; run it on a single task directory", file=sys.stderr)
+            return EXIT_INVALID
+        if args.output:
+            print("error: --watch prints to the terminal; --output is not supported with --watch", file=sys.stderr)
+            return EXIT_INVALID
+        return _watch_check(args, task, settings)
     if getattr(args, "dataset", False):
-        if args.format == "sarif":
-            print("error: SARIF is per-task; run rollups with --format json or text (per-task reports are embedded in the JSON rollup)", file=sys.stderr)
+        if args.format in ("sarif", "html"):
+            print("error: SARIF/HTML are per-task; run rollups with --format json, text or markdown (per-task reports are embedded in the JSON rollup)", file=sys.stderr)
             return EXIT_INVALID
         rollup = run_dataset_rollup(task, settings, adapter_name=args.adapter)
         if not rollup["task_folders_found"]:
             print(f"error: no task folders (task.toml) found under {task}", file=sys.stderr)
             return EXIT_INVALID
-        out = json.dumps(rollup, indent=2) if args.format == "json" else rollup_to_text(rollup)
+        if args.format == "json":
+            out = json.dumps(rollup, indent=2)
+        elif args.format == "markdown":
+            out = rollup_to_markdown(rollup)
+        else:
+            out = rollup_to_text(rollup)
         if args.output:
-            Path(args.output).write_text(out if out.endswith("\n") else out + "\n", encoding="utf-8")
+            _write_text(Path(args.output), out if out.endswith("\n") else out + "\n")
             if not args.quiet:
                 print(rollup_to_text(rollup), file=sys.stderr)
         else:
@@ -95,10 +169,14 @@ def cmd_check(args) -> int:
         out = json.dumps(report, indent=2)
     elif fmt == "sarif":
         out = json.dumps(to_sarif(report), indent=2)
+    elif fmt == "markdown":
+        out = to_markdown(report)
+    elif fmt == "html":
+        out = to_html(report)
     else:
         out = to_text(report)
     if args.output:
-        Path(args.output).write_text(out if out.endswith("\n") else out + "\n", encoding="utf-8")
+        _write_text(Path(args.output), out if out.endswith("\n") else out + "\n")
         if not args.quiet:
             print(f"wrote {fmt} report to {args.output}", file=sys.stderr)
             if fmt != "text":
@@ -144,7 +222,7 @@ def cmd_verify(args) -> int:
     except Exception as exc:
         print(f"error: report is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    problems = validate_report(report) + validate_report_consistency(report)
+    problems = _report_problems(report)
     if problems:
         print("report validation FAILED:")
         for p in problems:
@@ -240,7 +318,7 @@ def cmd_attest(args) -> int:
     except Exception as exc:
         print(f"error: report is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    problems = validate_report(report) + validate_report_consistency(report)
+    problems = _report_problems(report)
     if problems:
         print("error: refusing to attest an invalid or inconsistent report:", file=sys.stderr)
         for p in problems:
@@ -272,21 +350,36 @@ def cmd_attest(args) -> int:
                 print(f"  - {p}", file=sys.stderr)
             return EXIT_INVALID
     if getattr(args, "image", None):
-        if "@sha256:" not in args.image:
-            print(f"error: --image must be an immutable reference name@sha256:<64 hex>, got {args.image!r}", file=sys.stderr)
+        try:
+            _image_name, image_digest = parse_image_digest(args.image)
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
             return EXIT_INVALID
-        image_digest = "sha256:" + args.image.rsplit("@sha256:", 1)[1]
         report_digest = (report.get("environment") or {}).get("image_digest")
         if report_digest and image_digest != report_digest:
             print(f"error: refusing to attest {args.image!r}: its digest {image_digest} does not match the report's "
                   f"image_digest {report_digest}", file=sys.stderr)
             return EXIT_INVALID
-    statement = build_statement(report, raw)
+    statement = build_statement(report, raw, signed=bool(args.dsse and args.sign))
     out_obj: object = dsse_envelope_unsigned(statement) if args.dsse else statement
     out_path = Path(args.output)
-    out_path.write_text(json.dumps(out_obj, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {'DSSE envelope (UNSIGNED)' if args.dsse else 'in-toto statement (unsigned)'} to {out_path}")
     failures: list[str] = []
+    dsse_signed = False
+    if args.dsse and args.sign:
+        ok, msg = sign_dsse_with_cosign(out_obj, args.key)  # type: ignore[arg-type]
+        print(msg)
+        if ok:
+            dsse_signed = True
+        else:
+            # Do not leave a payload claiming signed=True when signing failed.
+            statement = build_statement(report, raw, signed=False)
+            out_obj = dsse_envelope_unsigned(statement)
+            failures.append("DSSE signing")
+    _write_text(out_path, json.dumps(out_obj, indent=2) + "\n")
+    if args.dsse:
+        print(f"wrote {'signed' if dsse_signed else 'DSSE envelope (UNSIGNED)'} to {out_path}")
+    else:
+        print(f"wrote in-toto statement (unsigned) to {out_path}")
     if getattr(args, "image", None):
         import tempfile
 
@@ -301,12 +394,12 @@ def cmd_attest(args) -> int:
         if not ok:
             failures.append("OCI image attestation")
     print(f"predicateType: {statement['predicateType']}  result: {statement['predicate']['result']}")
-    if args.sign:
+    if args.sign and not args.dsse:
         ok, msg = sign_with_cosign(out_path, args.key)
         print(msg)
         if not ok:
             failures.append("signing")
-    else:
+    elif not args.sign:
         print("signing: not performed. To sign: install cosign and re-run with --sign [--key cosign.key], "
               "or use `cosign sign-blob`. An unsigned attestation is NOT cryptographic evidence.")
     if failures:
@@ -317,7 +410,9 @@ def cmd_attest(args) -> int:
 
 
 def _finding_key(f: dict) -> tuple:
-    return (f.get("check_id"), f.get("path"), f.get("line"), f.get("status"))
+    # Severity is part of the identity: a LOW -> HIGH escalation at the same
+    # check/path/line/status must appear as a new finding, not vanish.
+    return (f.get("check_id"), f.get("path"), f.get("line"), f.get("status"), f.get("severity"))
 
 
 def cmd_diff(args) -> int:
@@ -327,10 +422,33 @@ def cmd_diff(args) -> int:
             print(f"error: report not found: {path}", file=sys.stderr)
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            obj = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
             print(f"error: {path} is not valid JSON: {exc}", file=sys.stderr)
             return None
+        if not isinstance(obj, dict):
+            print(f"error: {path} root is not a JSON object", file=sys.stderr)
+            return None
+        for key in ("environment", "policy"):
+            value = obj.get(key)
+            if value is not None and not isinstance(value, dict):
+                print(f"error: {path} {key} is not an object", file=sys.stderr)
+                return None
+        findings = obj.get("findings", [])
+        if not isinstance(findings, list) or not all(isinstance(item, dict) for item in findings):
+            print(f"error: {path} findings is not a list of objects", file=sys.stderr)
+            return None
+        for index, finding in enumerate(findings):
+            for field in ("check_id", "path", "status", "severity"):
+                value = finding.get(field)
+                if value is not None and not isinstance(value, str):
+                    print(f"error: {path} findings[{index}].{field} is not a string", file=sys.stderr)
+                    return None
+            line = finding.get("line")
+            if line is not None and (not isinstance(line, int) or isinstance(line, bool)):
+                print(f"error: {path} findings[{index}].line is not an integer", file=sys.stderr)
+                return None
+        return obj
 
     old, new = load(args.old), load(args.new)
     if old is None or new is None:
@@ -372,29 +490,77 @@ def cmd_verify_attestation(args) -> int:
     except Exception as exc:
         print(f"error: attestation is not valid JSON: {exc}", file=sys.stderr)
         return EXIT_INVALID
+    if not isinstance(obj, dict):
+        print("error: attestation root is not a JSON object", file=sys.stderr)
+        return EXIT_INVALID
+    if getattr(args, "image", None):
+        try:
+            parse_image_digest(args.image)
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_INVALID
     statement = obj
     signed = False
-    if isinstance(obj, dict) and obj.get("payload") and str(obj.get("payloadType", "")).startswith("application/vnd.in-toto"):
+    envelope: dict | None = None
+    if "payloadType" in obj or "payload" in obj:
         import base64
 
+        payload_type = obj.get("payloadType")
+        payload = obj.get("payload")
+        if not isinstance(payload_type, str) or not payload_type.startswith("application/vnd.in-toto"):
+            print("error: DSSE envelope has a missing or unsupported payloadType", file=sys.stderr)
+            return EXIT_INVALID
+        if not isinstance(payload, str):
+            print("error: DSSE payload is not a base64 string", file=sys.stderr)
+            return EXIT_INVALID
         try:
-            statement = json.loads(base64.b64decode(obj["payload"]))
+            statement = json.loads(base64.b64decode(payload, validate=True))
         except Exception as exc:
             print(f"error: cannot decode DSSE payload: {exc}", file=sys.stderr)
             return EXIT_INVALID
-        signatures = obj.get("signatures")
-        if signatures is None:
-            signatures = []
+        if not isinstance(statement, dict):
+            print("error: DSSE payload is not a JSON object", file=sys.stderr)
+            return EXIT_INVALID
+        signatures = obj.get("signatures", [])
         if not isinstance(signatures, list):
             print("error: DSSE envelope signatures is not a list", file=sys.stderr)
             return EXIT_INVALID
+        for index, signature in enumerate(signatures):
+            if not isinstance(signature, dict) or not isinstance(signature.get("sig"), str) or not signature["sig"]:
+                print(f"error: DSSE signature {index} is not an object with a non-empty 'sig'", file=sys.stderr)
+                return EXIT_INVALID
         signed = bool(signatures)
+        envelope = obj
     problems = verify_statement_local(statement)
     if problems:
         print("attestation structural verification FAILED:")
         for pr in problems:
             print(f"  - {pr}")
         return EXIT_POLICY
+    if getattr(args, "report", None):
+        report_path = Path(args.report)
+        if not report_path.is_file():
+            print(f"error: report not found: {report_path}", file=sys.stderr)
+            return EXIT_INVALID
+        try:
+            report_digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            print(f"error: cannot read report {report_path}: {exc}", file=sys.stderr)
+            return EXIT_INVALID
+        predicate = statement.get("predicate") or {}
+        recorded: set[str] = set()
+        configuration_source = predicate.get("configurationSource")
+        if isinstance(configuration_source, dict):
+            digest = configuration_source.get("digest")
+            if isinstance(digest, dict) and isinstance(digest.get("sha256"), str):
+                recorded.add(digest["sha256"])
+        extension = predicate.get("x-envcert")
+        if isinstance(extension, dict) and isinstance(extension.get("report_digest_sha256"), str):
+            recorded.add(extension["report_digest_sha256"])
+        if report_digest not in recorded:
+            print("attestation verification FAILED: the attestation does not bind to the supplied report.")
+            print(f"  - report sha256 {report_digest} is not among the predicate report digests {sorted(recorded)}")
+            return EXIT_POLICY
     signature_path = path.with_name(path.name + ".sig")
     signature_verified = False
     if signature_path.is_file():
@@ -404,38 +570,107 @@ def cmd_verify_attestation(args) -> int:
             return EXIT_POLICY
         signature_verified = True
         signed = True
-    if not signed and not args.allow_unsigned and not args.image:
-        print("attestation verification FAILED: the statement/envelope carries no signatures.")
-        print("  - structural validity alone is not cryptographic evidence; pass --allow-unsigned to check structure only,")
-        print("    or verify a signed attestation attached to an image with --image name@sha256:...")
+    if not signature_verified and envelope is not None and envelope.get("signatures"):
+        ok, msg = cosign_verify_dsse(envelope, args.key)
+        print(msg)
+        if ok:
+            signature_verified = True
+            signed = True
+        elif not getattr(args, "allow_unverified_signature", False):
+            print("attestation verification FAILED: embedded DSSE signatures could not be verified.")
+            print("  - pass --key <cosign.pub>, or --allow-unverified-signature for structural-only inspection.")
+            return EXIT_POLICY
+    if args.image:
+        ok, msg = cosign_verify_attestation(args.image, args.key, args.policy)
+        print(msg)
+        if not ok:
+            return EXIT_POLICY
+        print(f"attestation OK: OCI image attestation verified for {args.image}; "
+              f"predicateType={statement.get('predicateType')}, result={statement['predicate'].get('result')}")
+        return EXIT_OK
+    if not signed:
+        if not args.allow_unsigned:
+            print("attestation verification FAILED: the statement/envelope carries no signatures.")
+            print("  - structural validity alone is not cryptographic evidence; pass --allow-unsigned to check structure only,")
+            print("    or verify a signed attestation attached to an image with --image name@sha256:...")
+            return EXIT_POLICY
+    elif not signature_verified and not getattr(args, "allow_unverified_signature", False):
+        print("attestation verification FAILED: signatures are present but none could be verified cryptographically.")
+        print("  - a signature list is not evidence by itself. Provide the detached .sig and --key, use")
+        print("    --image name@sha256:..., or pass --allow-unverified-signature for structural-only inspection.")
         return EXIT_POLICY
     print(f"attestation structure OK: signed={signed}, signature_verified={signature_verified}, "
           f"predicateType={statement.get('predicateType')}, result={statement['predicate'].get('result')}, "
           f"subjects={len(statement.get('subject') or [])}")
-    if args.image:
-        ok, msg = cosign_verify_attestation(args.image, args.key, args.policy)
-        print(msg)
-        return EXIT_OK if ok else EXIT_POLICY
     if not signed:
         print("note: --allow-unsigned given, so this is structural verification only; it is NOT cryptographic evidence")
     elif not signature_verified:
-        print("note: signatures are present, but local structural verification does not verify them cryptographically; "
-              "use --image name@sha256:... or cosign verify-blob with the signer's key")
+        print("note: --allow-unverified-signature given; the DSSE signatures were NOT verified cryptographically")
+    return EXIT_OK
+
+
+def cmd_fix(args) -> int:
+    from envcert.core.fix import apply_fixes, plan_fixes
+
+    task = Path(args.path)
+    if not task.is_dir():
+        print(f"error: fix path is not a task directory: {task}", file=sys.stderr)
+        return EXIT_INVALID
+    fixes = plan_fixes(task)
+    if not fixes:
+        print("no deterministic fixes available for this task (run 'envcert check' for findings that need manual remediation)")
+        return EXIT_OK
+    print(f"{'applying' if args.apply else 'planned'} {len(fixes)} deterministic fix(es) for {task}:")
+    for fix in fixes:
+        marker = " [needs review]" if fix.needs_review else ""
+        print(f"  - {fix.check_id} {fix.path}: {fix.action}{marker}")
+    if not args.apply:
+        print("dry-run only: re-run with --apply to write these changes, then re-run 'envcert check'")
+        return EXIT_OK
+    apply_fixes(fixes)
+    print("applied. Re-run 'envcert check' to verify the findings are closed and review any [needs review] change.")
+    return EXIT_OK
+
+
+def cmd_new(args) -> int:
+    from envcert.core.scaffold import scaffold_task
+
+    dest = Path(args.path)
+    if dest.exists() and any(dest.iterdir()):
+        print(f"error: scaffold destination already exists and is not empty: {dest}", file=sys.stderr)
+        return EXIT_INVALID
+    name = args.name or f"envcert/{dest.resolve().name}"
+    written = scaffold_task(dest, name)
+    print(f"scaffolded Harbor task '{name}' in {dest}:")
+    for rel in written:
+        print(f"  - {rel}")
+    print("next: envcert check " + str(dest))
     return EXIT_OK
 
 
 def cmd_init(args) -> int:
-    dest = Path(args.path) / "envcert.toml"
+    root = Path(args.path)
+    if root.exists() and not root.is_dir():
+        print(f"error: init path is not a directory: {root}", file=sys.stderr)
+        return EXIT_INVALID
+    dest = root / "envcert.toml"
     if dest.exists() and not args.force:
         print(f"error: {dest} already exists (use --force to overwrite)", file=sys.stderr)
         return EXIT_INVALID
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(
-        '# EnvCert configuration — see docs/guides/CONFIGURATION.md\n'
-        '[envcert]\nprofile = "harbor"\n\n'
-        '[checks]\n# enabled = ["EC001", "EC011"]  # default: all in profile\n# disabled = ["EC031"]\n\n'
-        '[checks.dynamic]\nenabled = false\nrepetitions = 3\n\n'
-        '[policy]\nfail_on = ["critical", "high"]\n', encoding="utf-8")
+    if dest.exists() and dest.is_dir():
+        print(f"error: {dest} is a directory, not a config file", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"error: cannot create {root}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    _write_text(dest,
+                '# EnvCert configuration — see docs/guides/CONFIGURATION.md\n'
+                '[envcert]\nprofile = "harbor"\n\n'
+                '[checks]\n# enabled = ["EC001", "EC011"]  # default: all in profile\n# disabled = ["EC031"]\n\n'
+                '[checks.dynamic]\nenabled = false\nrepetitions = 3\n\n'
+                '[policy]\nfail_on = ["critical", "high"]\n')
     print(f"wrote {dest}")
     return EXIT_OK
 
@@ -464,8 +699,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc = sub.add_parser("check", help="check a task directory")
     pc.add_argument("path", help="path to the task directory (e.g. ./my-task)")
     pc.add_argument("--profile", choices=sorted(PROFILES), default=None, help="validation profile (default: harbor, or from envcert.toml)")
-    pc.add_argument("--adapter", choices=["auto", "harbor", "generic", "nemo-gym", "inspect"], default="auto")
-    pc.add_argument("--format", choices=["text", "json", "sarif"], default="text")
+    pc.add_argument("--adapter", choices=["auto", "harbor", "generic", "nemo-gym", "inspect", "dataset"], default="auto")
+    pc.add_argument("--format", choices=["text", "json", "sarif", "markdown", "html"], default="text")
     pc.add_argument("--output", "-o", default=None, help="write report to this file (text summary still goes to stderr)")
     pc.add_argument("--config", default=None, help="path to envcert.toml (default: <task>/envcert.toml if present)")
     pc.add_argument("--execution", choices=["none", "docker", "local-python", "external"], default=None,
@@ -481,7 +716,11 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--disable", action="append", default=None, help="skip this check ID (repeatable)")
     pc.add_argument("--repetitions", type=int, default=None, help="repetitions for dynamic repeatability (default 3)")
     pc.add_argument("--mutation", action="store_true", help="enable mutation testing (local-python pytest tasks only)")
+    pc.add_argument("--max-mutants", type=int, default=None, help="mutant budget for mutation testing (1-200, default 10)")
     pc.add_argument("--quiet", action="store_true", help="suppress the stderr summary when --output is used")
+    pc.add_argument("--watch", action="store_true", help="re-run the check whenever the task bundle changes (terminal output, Ctrl-C to stop)")
+    pc.add_argument("--watch-interval", type=int, default=5, help="seconds between watch polls (default 5)")
+    pc.add_argument("--watch-iterations", type=int, default=0, help=argparse.SUPPRESS)
     pc.set_defaults(fn=cmd_check)
 
     pver = sub.add_parser("verify", help="validate a JSON report against the published schema, recompute policy/summary, and optionally re-check the task")
@@ -520,7 +759,21 @@ def build_parser() -> argparse.ArgumentParser:
     pva.add_argument("--policy", default=None, help="CUE/Rego policy file passed to cosign verify-attestation")
     pva.add_argument("--allow-unsigned", action="store_true",
                      help="allow structural-only verification of an unsigned statement/envelope (never cryptographic evidence)")
+    pva.add_argument("--allow-unverified-signature", action="store_true",
+                     help="allow structural-only verification when a DSSE envelope lists signatures that cannot be verified locally")
+    pva.add_argument("--report", default=None,
+                     help="report JSON the attestation must bind to (compares sha256(report) with the predicate's recorded report digest)")
     pva.set_defaults(fn=cmd_verify_attestation)
+
+    pfix = sub.add_parser("fix", help="plan (or with --apply, write) deterministic fixes for fixable findings (.dockerignore, declared policies)")
+    pfix.add_argument("path", help="path to the task directory")
+    pfix.add_argument("--apply", action="store_true", help="write the planned fixes (default is a dry-run plan)")
+    pfix.set_defaults(fn=cmd_fix)
+
+    pnew = sub.add_parser("new", help="scaffold a new Harbor task that passes EnvCert's static checks")
+    pnew.add_argument("path", help="directory to create the task in")
+    pnew.add_argument("--name", default=None, help="task name for task.toml (default: envcert/<directory name>)")
+    pnew.set_defaults(fn=cmd_new)
 
     pi = sub.add_parser("init", help="write a starter envcert.toml")
     pi.add_argument("path", nargs="?", default=".")
@@ -551,6 +804,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # ensure checks are registered even when CLI imported without engine
+import envcert.checks.cheat_checks  # noqa: E402,F401
+import envcert.checks.dataset_checks  # noqa: E402,F401
 import envcert.checks.dynamic_checks  # noqa: E402,F401
 import envcert.checks.external_checks  # noqa: E402,F401
 import envcert.checks.static_checks  # noqa: E402,F401

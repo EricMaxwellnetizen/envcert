@@ -5,10 +5,13 @@ from pathlib import Path
 from typing import Any
 
 # import for registry side effects
+import envcert.checks.cheat_checks  # noqa: F401,E402
+import envcert.checks.dataset_checks  # noqa: F401,E402
 import envcert.checks.dynamic_checks  # noqa: F401,E402
 import envcert.checks.external_checks  # noqa: F401,E402
 import envcert.checks.static_checks  # noqa: F401,E402
 from envcert import REPORT_SCHEMA_VERSION, __version__
+from envcert.adapters import dataset as dataset_adapter
 from envcert.adapters import generic as generic_adapter
 from envcert.adapters import harbor as harbor_adapter
 from envcert.adapters import inspect_adapter
@@ -18,8 +21,13 @@ from envcert.checks.base import REGISTRY, CheckContext
 from envcert.core.config import Settings
 from envcert.core.digests import bundle_digest, sha256_file
 from envcert.core.errors import ConfigError
+from envcert.core.images import image_digest_from_reference, normalize_digest
 from envcert.core.models import Finding, Severity, Status
-from envcert.core.report import finding_fingerprint
+from envcert.core.report import (
+    finding_fingerprint,
+    registry_snapshot,
+    version_at_least,
+)
 from envcert.runners.docker_runner import DockerRunner
 from envcert.runners.local_runner import LocalPythonRunner
 
@@ -31,9 +39,37 @@ LIMITATIONS = [
     "EnvCert reports evidence about checked properties; it is not a certification that an environment is unhackable.",
 ]
 
+_PLUGINS_LOADED = False
+PLUGIN_LOAD_ERRORS: list[str] = []
+
+
+def load_plugin_checks() -> list[str]:
+    """Import third-party checks registered under the ``envcert.checks``
+    entry-point group.  A broken plugin is reported, never silently loaded
+    or silently dropped."""
+    global _PLUGINS_LOADED
+    if _PLUGINS_LOADED:
+        return PLUGIN_LOAD_ERRORS
+    _PLUGINS_LOADED = True
+    try:
+        from importlib.metadata import entry_points
+
+        eps = entry_points(group="envcert.checks")
+    except Exception as exc:  # noqa: BLE001
+        PLUGIN_LOAD_ERRORS.append(f"plugin discovery failed: {type(exc).__name__}: {exc}")
+        return PLUGIN_LOAD_ERRORS
+    for ep in eps:
+        try:
+            ep.load()
+        except Exception as exc:  # noqa: BLE001
+            PLUGIN_LOAD_ERRORS.append(f"plugin check {ep.name!r} failed to load: {type(exc).__name__}: {exc}")
+    return PLUGIN_LOAD_ERRORS
+
 
 def load_task(path: Path, adapter_name: str = "auto") -> TaskContext:
     path = Path(path)
+    if adapter_name == "dataset" or (adapter_name == "auto" and dataset_adapter.is_dataset_path(path)):
+        return dataset_adapter.load(path)
     if adapter_name == "harbor" or (adapter_name == "auto" and harbor_adapter.is_harbor_task(path)):
         return harbor_adapter.load(path)
     if adapter_name == "nemo-gym":
@@ -68,21 +104,19 @@ def resolve_image_digest(settings: Settings) -> tuple[str | None, str]:
     import subprocess
 
     digest_re = re.compile(r"sha256:[0-9a-f]{64}")
-    if settings.image_digest:
-        d = settings.image_digest.strip().lower()
-        if not digest_re.fullmatch(d):
-            raise ConfigError(
-                f"invalid --image-digest {settings.image_digest!r}: expected sha256:<64 lowercase hex>; "
-                "refusing to bind a malformed digest"
-            )
-        return d, "explicit --image-digest"
+    explicit = normalize_digest(settings.image_digest, "--image-digest") if settings.image_digest else None
+    reference_digest = image_digest_from_reference(settings.image) if settings.image else None
+    if explicit and reference_digest and explicit != reference_digest:
+        raise ConfigError(
+            f"--image-digest {explicit} conflicts with the digest in --image "
+            f"{settings.image!r} ({reference_digest}); refusing to bind contradictory image evidence"
+        )
+    if explicit:
+        return explicit, "explicit --image-digest"
     if settings.image:
         ref = settings.image.strip()
-        if "@sha256:" in ref:
-            d = "sha256:" + ref.rsplit("@sha256:", 1)[1].lower()
-            if not digest_re.fullmatch(d):
-                raise ConfigError(f"invalid digest in --image reference {ref!r}: expected name@sha256:<64 hex>")
-            return d, "digest taken from --image reference"
+        if reference_digest:
+            return reference_digest, "digest taken from --image reference"
         exe = shutil.which("docker")
         if not exe:
             raise ConfigError(
@@ -139,20 +173,8 @@ def resolve_image_digest(settings: Settings) -> tuple[str | None, str]:
     return None, ""
 
 
-def selected_checks(settings: Settings) -> list[str]:
-    ids = []
-    for cid, (info, _fn) in sorted(REGISTRY.items()):
-        if settings.enabled is not None and cid not in settings.enabled:
-            continue
-        if cid in settings.disabled:
-            continue
-        if settings.categories is not None and info.category not in settings.categories and not info.dynamic:
-            continue
-        ids.append(cid)
-    return ids
-
-
-def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") -> dict[str, Any]:
+def validate_check_selection(settings: Settings) -> None:
+    """Reject unknown --enable/--disable IDs before any task is inspected."""
     known = set(REGISTRY)
     requested = set(settings.enabled or []) | set(settings.disabled)
     unknown = sorted(requested - known)
@@ -160,10 +182,46 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
         raise ConfigError(
             f"unknown check ID(s): {', '.join(unknown)}; run 'envcert list-checks' to see valid IDs"
         )
+
+
+def selected_checks(settings: Settings) -> list[str]:
+    ids = []
+    for cid, (info, _fn) in sorted(REGISTRY.items()):
+        if settings.enabled is not None:
+            # An explicit list is the operator's selection; it overrides the
+            # profile's category filter instead of being intersected with it.
+            if cid not in settings.enabled:
+                continue
+        elif settings.categories is not None and info.category not in settings.categories and not info.dynamic:
+            continue
+        if cid in settings.disabled:
+            continue
+        ids.append(cid)
+    return ids
+
+
+def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") -> dict[str, Any]:
+    validate_check_selection(settings)
     ctx = load_task(task_path, adapter_name)
-    digest, file_count = bundle_digest(ctx.root, warnings=ctx.warnings)
+    for plugin_error in load_plugin_checks():
+        ctx.warnings.append(plugin_error)
+    digest, file_count = bundle_digest(ctx.root, warnings=ctx.warnings, only=ctx.bundle_files)
+    if ctx.adapter == "dataset" and settings.enabled is None:
+        # A data file has no Dockerfile/verifier bundle to lint: run the
+        # dataset suite plus the generic content checks that apply to rows.
+        from dataclasses import replace
+
+        settings = replace(settings, enabled=["EC001", "EC013", "EC080", "EC081", "EC082", "EC083", "EC084", "EC085"])
+    # Naming an external-companion check explicitly is itself a request to run
+    # it; otherwise `--enable EC070` would select a check that always returns
+    # NOT_RUN because --external-tools was not also passed.
+    external_tools = settings.external_tools or any(
+        cid in REGISTRY and REGISTRY[cid][0].category == "external"
+        for cid in (settings.enabled or [])
+    )
     check_ctx = CheckContext(task=ctx, execution=settings.execution, repetitions=settings.repetitions,
-                             enable_mutation=settings.enable_mutation, external_tools=settings.external_tools,
+                             enable_mutation=settings.enable_mutation, max_mutants=settings.max_mutants,
+                             external_tools=external_tools,
                              runner_command=settings.runner_command)
     image_digest, image_note = resolve_image_digest(settings)
     if image_note and settings.image and "not a registry manifest digest" in image_note:
@@ -199,9 +257,15 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
             baseline_report = _json.loads(baseline_path.read_text(encoding="utf-8"))
         except Exception as exc:
             raise ConfigError(f"baseline report is not valid JSON: {exc}") from exc
-        baseline_keys = {
-            finding_fingerprint(f) for f in baseline_report.get("findings", []) if isinstance(f, dict)
-        }
+        if not isinstance(baseline_report, dict):
+            raise ConfigError("baseline report root is not a JSON object")
+        baseline_findings = baseline_report.get("findings")
+        if not isinstance(baseline_findings, list):
+            raise ConfigError("baseline report has no findings list")
+        for index, finding in enumerate(baseline_findings):
+            if not isinstance(finding, dict):
+                raise ConfigError(f"baseline report findings[{index}] is not an object")
+        baseline_keys = {finding_fingerprint(f) for f in baseline_findings}
         for f in findings:
             if f.status in (Status.FAIL, Status.WARN) and finding_fingerprint(f.to_dict()) in baseline_keys:
                 f.baseline_suppressed = True
@@ -267,9 +331,18 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
             "fail_on": settings.fail_on_names(),
             "repetitions": settings.repetitions,
             "mutation_enabled": settings.enable_mutation,
-            "external_tools": settings.external_tools,
+            "external_tools": external_tools,
+            # Recorded so --recheck can distinguish a deliberate subset from a
+            # report that silently omitted checks.
+            "selection": {
+                "enabled": settings.enabled,
+                "disabled": settings.disabled,
+                "categories": settings.categories,
+                "external_tools": external_tools,
+            },
             "runner": runner_info,
         },
+        "checks_available": sorted(REGISTRY),
         "checks_executed": executed,
         "checks_not_executed": sorted(set(REGISTRY) - set(executed)),
         "findings": [f.to_dict() for f in findings],
@@ -285,10 +358,14 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
 
 
 def recheck_report(report: dict[str, Any], task_path: Path) -> list[str]:
-    """Re-run the static checks recorded in a report and compare the findings.
+    """Re-run the report's recorded static check selection and compare findings.
 
     This answers a question report schema validation cannot: *are the findings
-    in this report the findings EnvCert actually produces for this task?*
+    in this report the findings EnvCert actually produces for this task?*  It
+    also checks that the report did not quietly shrink its selection: a report
+    that omits checks from both `checks_executed` and `checks_not_executed`, or
+    that claims a full run while listing only a subset, fails.
+
     Dynamic checks are not re-run (they execute task code); external-tool
     checks are skipped because their availability changes between machines.
     """
@@ -297,20 +374,103 @@ def recheck_report(report: dict[str, Any], task_path: Path) -> list[str]:
     from envcert.core.config import PROFILES, Settings
     from envcert.core.errors import ConfigError
 
+    if not isinstance(report, dict):
+        return ["report root is not a JSON object"]
     problems: list[str] = []
-    execution = report.get("execution") or {}
-    environment = report.get("environment") or {}
-    profile = str(execution.get("profile") or "harbor")
-    if profile not in PROFILES:
+    execution = report.get("execution")
+    environment = report.get("environment")
+    if not isinstance(execution, dict):
+        return ["report.execution is not an object"]
+    if not isinstance(environment, dict):
+        environment = {}
+    profile = execution.get("profile") or "harbor"
+    if not isinstance(profile, str) or profile not in PROFILES:
         return [f"report names an unknown profile {profile!r}; cannot re-check"]
-    executed = report.get("checks_executed") or []
+    executed = report.get("checks_executed")
+    if not isinstance(executed, list) or not all(isinstance(item, str) for item in executed):
+        return ["report.checks_executed is not a list of check IDs"]
+    findings = report.get("findings")
+    if not isinstance(findings, list) or not all(isinstance(item, dict) for item in findings):
+        return ["report.findings is not a list of objects"]
     unknown = [cid for cid in executed if cid not in REGISTRY]
     if unknown:
         problems.append(f"report references unknown check IDs: {sorted(unknown)}")
-    static_ids = [cid for cid in executed
-                  if cid in REGISTRY
-                  and not REGISTRY[cid][0].dynamic
-                  and REGISTRY[cid][0].category != "external"]
+    not_executed = report.get("checks_not_executed")
+    if not_executed is not None and (
+            not isinstance(not_executed, list) or not all(isinstance(item, str) for item in not_executed)):
+        return problems + ["report.checks_not_executed is not a list of check IDs"]
+
+    selection = execution.get("selection")
+    if selection is not None:
+        if not isinstance(selection, dict):
+            return problems + ["report.execution.selection is not an object"]
+        enabled = selection.get("enabled")
+        disabled = selection.get("disabled") or []
+        categories = selection.get("categories")
+        if enabled is not None and (
+                not isinstance(enabled, list) or not all(isinstance(item, str) for item in enabled)):
+            return problems + ["report.execution.selection.enabled is not a list of check IDs"]
+        if not isinstance(disabled, list) or not all(isinstance(item, str) for item in disabled):
+            return problems + ["report.execution.selection.disabled is not a list of check IDs"]
+        if categories is not None and (
+                not isinstance(categories, list) or not all(isinstance(item, str) for item in categories)):
+            return problems + ["report.execution.selection.categories is not a list of category names"]
+        settings = Settings(
+            profile=profile,
+            enabled=enabled,
+            disabled=list(disabled),
+            categories=categories if categories is not None else PROFILES[profile]["categories"],
+            execution="none",
+            external_tools=bool(selection.get("external_tools", False)),
+        )
+        expected = selected_checks(settings)
+        missing = sorted(set(expected) - set(executed))
+        extra = sorted(set(executed) - set(expected))
+        if missing:
+            problems.append(
+                "report omits checks selected by its recorded configuration: "
+                f"{missing}"
+            )
+        if extra:
+            problems.append(
+                "report lists checks not selected by its recorded configuration: "
+                f"{extra}"
+            )
+        static_ids = [
+            cid for cid in expected
+            if cid in REGISTRY
+            and not REGISTRY[cid][0].dynamic
+            and REGISTRY[cid][0].category != "external"
+        ]
+    else:
+        # Older reports did not record the selection.  A full run (empty
+        # checks_not_executed and every then-available check in
+        # checks_executed) is still re-checkable; a subset is not, because it
+        # cannot be distinguished from a report that silently omitted checks.
+        if not_executed:
+            return problems + [
+                "report does not record its check selection; cannot re-check a report that "
+                "skipped checks (regenerate it with EnvCert >= 0.3.3)"
+            ]
+        snapshot = registry_snapshot(report)
+        if snapshot is None:
+            return problems + [
+                "report does not record checks_available and its registry version is unknown; "
+                "cannot determine whether checks were omitted"
+            ]
+        missing = sorted(set(snapshot) - set(executed))
+        if missing:
+            return problems + [
+                "report claims a full check run but omits checks available in its version: "
+                f"{missing}"
+            ]
+        static_ids = [
+            cid for cid in executed
+            if cid in REGISTRY
+            and not REGISTRY[cid][0].dynamic
+            and REGISTRY[cid][0].category != "external"
+        ]
+
     if not static_ids:
         return problems or ["report records no static checks to re-check"]
     settings = Settings(profile=profile, enabled=list(static_ids), execution="none", external_tools=False)
@@ -325,21 +485,45 @@ def recheck_report(report: dict[str, Any], task_path: Path) -> list[str]:
         return (finding.get("check_id"), finding.get("status"), finding.get("severity"),
                 finding.get("path"), finding.get("line"))
 
-    reported = Counter(
-        key(f) for f in report.get("findings") or []
-        if isinstance(f, dict) and f.get("check_id") in static_ids and not f.get("baseline_suppressed")
-    )
-    reproduced = Counter(key(f) for f in rerun.get("findings") or [] if f.get("check_id") in static_ids)
-    for item, count in (reported - reproduced).items():
-        problems.append(
-            f"finding reported but not reproduced on re-check: {item[0]} {item[1]}/{item[2]} "
-            f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
-        )
-    for item, count in (reproduced - reported).items():
-        problems.append(
-            f"finding reproduced on re-check but missing from the report: {item[0]} {item[1]}/{item[2]} "
-            f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
-        )
+    def label(finding: dict[str, Any]) -> str:
+        return (f"{finding.get('check_id')} {finding.get('status')}/{finding.get('severity')} "
+                f"at {finding.get('path') or '-'}:{finding.get('line') or '-'}")
+
+    reported_findings = [f for f in findings if f.get("check_id") in static_ids]
+    reproduced_findings = [f for f in rerun.get("findings") or [] if f.get("check_id") in static_ids]
+
+    # Newer reports are compared on full content (message/evidence too), so
+    # editing a finding in place is detected.  Pre-0.3.2 reports are compared
+    # on identity only because check wording may legitimately have changed.
+    reported: Counter[Any]
+    reproduced: Counter[Any]
+    if version_at_least(report.get("envcert_version"), (0, 3, 2)):
+        reported = Counter(finding_fingerprint(f) for f in reported_findings)
+        reproduced = Counter(finding_fingerprint(f) for f in reproduced_findings)
+        reported_examples = {finding_fingerprint(f): f for f in reported_findings}
+        reproduced_examples = {finding_fingerprint(f): f for f in reproduced_findings}
+        for item, count in (reported - reproduced).items():
+            problems.append(
+                f"finding reported but not reproduced on re-check: {label(reported_examples[item])} (x{count})"
+            )
+        for item, count in (reproduced - reported).items():
+            problems.append(
+                f"finding reproduced on re-check but missing from the report: "
+                f"{label(reproduced_examples[item])} (x{count})"
+            )
+    else:
+        reported = Counter(key(f) for f in reported_findings)
+        reproduced = Counter(key(f) for f in reproduced_findings)
+        for item, count in (reported - reproduced).items():
+            problems.append(
+                f"finding reported but not reproduced on re-check: {item[0]} {item[1]}/{item[2]} "
+                f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
+            )
+        for item, count in (reproduced - reported).items():
+            problems.append(
+                f"finding reproduced on re-check but missing from the report: {item[0]} {item[1]}/{item[2]} "
+                f"at {item[3] or '-'}:{item[4] or '-'} (x{count})"
+            )
     return problems
 
 

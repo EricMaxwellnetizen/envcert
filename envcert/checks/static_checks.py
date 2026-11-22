@@ -136,7 +136,7 @@ EC055 = CheckInfo("EC055", "Inspect scorer is not trivially satisfiable", "verif
                   "Scorer choice can be legitimate (e.g. short factual answers); this flags weakness patterns for review, not proof of exploitability.")
 
 ALL_STATIC = [EC001, EC002, EC003, EC010, EC011, EC012, EC013, EC014, EC020, EC021, EC022, EC023, EC024,
-              EC030, EC031, EC032, EC033, EC040, EC041, EC050, EC051, EC052, EC053, EC054]
+              EC030, EC031, EC032, EC033, EC040, EC041, EC050, EC051, EC052, EC053, EC054, EC055]
 
 SECRET_PATTERNS = [
     (re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"][^'\"${}\s]{8,}['\"]"), "credential assignment"),
@@ -203,6 +203,17 @@ def check_structure(c: CheckContext) -> list:
                             evidence={"missing": missing, "adapter": ctx.adapter})]
         return [passed(EC001, f"Recognised NeMo Gym dataset '{ctx.task_name}' (dataset files: {ctx.dataset_files}, verifier: {ctx.verifier_paths}).",
                        evidence={"adapter": ctx.adapter, "dataset_files": ctx.dataset_files})]
+    if ctx.adapter == "dataset":
+        if not ctx.dataset_files:
+            return [finding(EC001, Status.FAIL, "No dataset files (.jsonl/.json/.csv) found to audit.",
+                            evidence={"adapter": ctx.adapter})]
+        from envcert.checks.dataset_checks import load_dataset_rows
+
+        data = load_dataset_rows(ctx)
+        total_rows = sum(len(i["rows"]) for i in data["files"].values())
+        return [passed(EC001, f"Recognised dataset '{ctx.task_name}' ({len(ctx.dataset_files)} file(s), {total_rows} rows inspected, prompt field={data['prompt_field']!r}, answer field={data['answer_field']!r}).",
+                       evidence={"adapter": ctx.adapter, "dataset_files": ctx.dataset_files, "rows": total_rows,
+                                 "prompt_field": data["prompt_field"], "answer_field": data["answer_field"]})]
     if ctx.adapter == "inspect":
         if not ctx.verifier_paths:
             missing.append("a Python file defining @task with inspect_ai imports")
@@ -284,7 +295,8 @@ def check_solution_present(c: CheckContext) -> list:
 def check_git_exposed(c: CheckContext) -> list:
     ctx = c.task
     # Files under .git are not enumerated by our walker if huge; also check dirs via known markers
-    markers = [f for f in ctx.files if ".git/" in f or "/.git" in f or f.startswith(".git") or "/.git" in ("/" + f)]
+    # Component-exact: `.gitignore`/`.github` are not `.git` metadata.
+    markers = [f for f in ctx.files if ".git" in f.split("/")]
     if ctx.build_context is not None:
         ctx_rel = ctx.build_context.relative_to(ctx.root).as_posix() if ctx.build_context != ctx.root else ""
         in_context = [f for f in markers if (ctx_rel == "" or f.startswith(ctx_rel + "/") or f == ctx_rel)]
@@ -332,10 +344,28 @@ def _context_rel(ctx, path_in_context: str) -> str:
 def check_solution_in_image(c: CheckContext) -> list:
     ctx = c.task
     findings = []
+    # Material the instruction itself declares as agent-visible input (e.g.
+    # "a public oracle header is available at /app/oracle.hpp; your solution
+    # may include it") is task design, not a leak.  Undisclosed inclusion is
+    # what this check exists to catch; disclosure is EC014's territory.
+    instruction = ""
+    if ctx.instruction_path:
+        instruction = ctx.text(ctx.instruction_path.relative_to(ctx.root).as_posix()) or ""
+    declared_public: list[str] = []
+
+    def is_declared(path: str) -> bool:
+        base = path.rsplit("/", 1)[-1]
+        return bool(base and (base in instruction or path in instruction))
     copies = _copied_into_image(ctx)
     ctx_prefix = ""
     if ctx.build_context is not None and ctx.build_context != ctx.root:
         ctx_prefix = ctx.build_context.relative_to(ctx.root).as_posix() + "/"
+    if ctx.dockerfile is None and ctx.build_context is None:
+        # No Dockerfile/compose build: bundle files do not enter an image by
+        # construction (prebuilt images, compose services built elsewhere),
+        # so presence of solution/ in the bundle is not, by itself, a leak.
+        return [passed(EC011, "No Dockerfile or build context found; solution material in the bundle cannot be shown to enter an image statically.",
+                       evidence={"note": "no build context", "declared_public_excluded": declared_public})]
     # 1. solution-like files physically inside the build context
     in_context_solutions = []
     for f in ctx.files:
@@ -343,16 +373,34 @@ def check_solution_in_image(c: CheckContext) -> list:
             continue
         rel_in_ctx = f[len(ctx_prefix):] if ctx_prefix else f
         base = f.rsplit("/", 1)[-1]
+        if is_declared(f):
+            declared_public.append(f)
+            continue
         if ("solution" in f.split("/") or ANSWER_NAMES.search(base)) and not f.startswith("tests/"):
             if not dockerignore_match(rel_in_ctx, ctx.dockerignore_patterns):
                 in_context_solutions.append(f)
-    broad_copies = [cp for cp in copies if cp["source"] in (".", "./", "*", "./*", "")]
-    if in_context_solutions and (broad_copies or copies):
-        cp = (broad_copies or copies)[0]
+    def copy_covers(cp, rel_in_ctx: str) -> bool:
+        src = cp["source"].strip()
+        if src in (".", "./", "*", "./*", ""):
+            return True
+        src = src.lstrip("./").rstrip("/")
+        return rel_in_ctx == src or rel_in_ctx.startswith(src + "/")
+
+    rel_solutions = []
+    for f in in_context_solutions:
+        rel_solutions.append(f[len(ctx_prefix):] if ctx_prefix and f.startswith(ctx_prefix) else f)
+    covering = [cp for cp in copies if any(copy_covers(cp, rel) for rel in rel_solutions)]
+    if in_context_solutions and covering:
+        cp = covering[0]
         findings.append(finding(EC011, Status.FAIL,
                                  f"Reference/answer material inside the build context ({in_context_solutions[0]}) is plausibly copied into the image by '{cp['instr']} {cp['source']}' (Dockerfile line {cp['line']}).",
                                  path="environment/Dockerfile" if ctx.dockerfile_path else None, line=cp["line"],
                                  evidence={"files": in_context_solutions[:10], "copy": cp}, confidence=Confidence.MEDIUM))
+    elif in_context_solutions and copies:
+        # Every COPY is narrow and none covers the material: inclusion is
+        # disproven for this Dockerfile, not merely unproven.
+        findings.append(passed(EC011, f"Answer-like files exist in the build context ({in_context_solutions[0]}) but no COPY/ADD covers them; they are not baked into the image by this Dockerfile.",
+                               evidence={"files": in_context_solutions[:10], "copies_analysed": len(copies)}))
     elif in_context_solutions:
         findings.append(finding(EC011, Status.WARN,
                                 f"Answer-like files exist inside the build context ({in_context_solutions[0]}) but no COPY/ADD clearly includes them; verify they are not baked into the image.",
@@ -360,6 +408,9 @@ def check_solution_in_image(c: CheckContext) -> list:
     # 2. explicit COPY of solution paths
     for cp in copies:
         src = cp["source"].lstrip("./")
+        if is_declared(src):
+            declared_public.append(src)
+            continue
         if "solution" in src.split("/") or ANSWER_NAMES.search(src):
             findings.append(finding(EC011, Status.FAIL,
                                     f"Dockerfile explicitly copies solution/answer material into the image: '{cp['instr']} {cp['source']} {cp['dest']}' (line {cp['line']}).",
@@ -369,17 +420,23 @@ def check_solution_in_image(c: CheckContext) -> list:
                                     f"COPY source '{cp['source']}' escapes the build context (line {cp['line']}); Docker rejects this, but it signals an attempt to include external (possibly solution) material.",
                                     line=cp["line"], evidence={"copy": cp}, confidence=Confidence.MEDIUM))
     if findings:
+        for item in findings:
+            item.evidence["declared_public_excluded"] = declared_public
         return findings
     sol = harbor_adapter.solution_entrypoints(ctx) if ctx.adapter == "harbor" else [f for f in ctx.files if f.startswith("solution/")]
-    return [passed(EC011, "Reference solution exists outside the build context and no COPY/ADD includes solution material in the image."
-                   if sol else "No solution material found in the build context or COPY/ADD instructions.",
-                   evidence={"solution_entrypoints": sol, "copies_analysed": len(copies)})]
+    note = f" ({len(declared_public)} instruction-declared public input(s) excluded: {', '.join(declared_public[:3])})" if declared_public else ""
+    return [passed(EC011, ("Reference solution exists outside the build context and no COPY/ADD includes solution material in the image."
+                   if sol else "No solution material found in the build context or COPY/ADD instructions.") + note,
+                   evidence={"solution_entrypoints": sol, "copies_analysed": len(copies), "declared_public_excluded": declared_public})]
 
 
 @check(EC012)
 def check_answer_files_visible(c: CheckContext) -> list:
     ctx = c.task
     hits: list = []
+    referenced_inputs: list = []
+    instruction = (ctx.text(ctx.instruction_path.relative_to(ctx.root).as_posix())
+                   if ctx.instruction_path else "") or ""
     agent_areas = ("environment/",) if ctx.environment_dir else ()
     for f in ctx.files:
         if f.startswith("tests/") or "/tests/" in f or f.startswith("solution/"):
@@ -388,12 +445,19 @@ def check_answer_files_visible(c: CheckContext) -> list:
             continue
         base = f.rsplit("/", 1)[-1]
         if ANSWER_NAMES.search(base) and base not in ("instruction.md",):
+            # A file the instruction itself hands to the agent as task input
+            # (e.g. "compute the expected_output format from examples/...") is
+            # declared input data, not a leak; filename alone must not flag it.
+            if base in instruction or f in instruction:
+                referenced_inputs.append(f)
+                continue
             hits.append(f)
     if hits:
         return [finding(EC012, Status.WARN,
                         f"Answer-like filenames in agent-visible areas: {', '.join(hits[:5])}. If these contain expected outputs/gold material the agent can read them.",
-                        path=hits[0], evidence={"files": hits[:20]}, confidence=Confidence.LOW)]
-    return [passed(EC012, "No answer/gold/expected-output filenames in agent-visible areas (outside tests/ and solution/).")]
+                        path=hits[0], evidence={"files": hits[:20], "referenced_inputs_excluded": referenced_inputs}, confidence=Confidence.LOW)]
+    return [passed(EC012, "No answer/gold/expected-output filenames in agent-visible areas (outside tests/ and solution/).",
+                   evidence={"referenced_inputs_excluded": referenced_inputs})]
 
 
 @check(EC013)
@@ -540,15 +604,30 @@ def check_writable_verifier(c: CheckContext) -> list:
             t = ctx.text(f)
             if t:
                 texts.append((f, t))
+    def verifier_relevant(line: str) -> bool:
+        # World-writable *agent workspace* (/app, /results, /data) is the
+        # normal artifact channel; it becomes verifier tampering when the
+        # target is the verifier/tests, the reward directory, or a system
+        # path.  Targetless chmod (variable paths) stays flagged for review.
+        targets = [t.strip("'\"") for t in re.split(r"\s+", line)
+                   if t.startswith("/") or "test" in t.lower() or "verifier" in t.lower()]
+        if not targets:
+            return True
+        return any(
+            "verifier" in t.lower() or "test" in t.lower()
+            or t.startswith(("/usr", "/etc", "/bin", "/sbin", "/var", "/opt", "/root"))
+            for t in targets)
     for path, text in texts:
         for i, line in enumerate(text.splitlines(), 1):
             if re.search(r"chmod\s+(-[a-zA-Z]+\s+)*(777|a\+w|o\+w|ugo\+w)", line) or "privileged = true" in line:
+                if "chmod" in line and not verifier_relevant(line):
+                    continue
                 hits.append({"path": path, "line": i, "text": line.strip()[:160]})
     if hits:
         h = hits[0]
         return [finding(EC023, Status.WARN, f"World-writable permissions declared at {h['path']}:{h['line']} ('{h['text']}'); agent-writable verifier/system paths enable tampering.",
                         path=str(h["path"]), line=int(h["line"]), evidence={"hits": hits[:10]}, confidence=Confidence.MEDIUM)]
-    return [passed(EC023, "No chmod 777 / a+w style world-writable declarations outside tests/.")]
+    return [passed(EC023, "No world-writable declarations on verifier/test/system paths (agent-workspace chmod is the normal artifact channel).")]
 
 
 @check(EC024)
@@ -591,13 +670,20 @@ def check_image_pinning(c: CheckContext) -> list:
         return [not_applicable(EC030, "No Dockerfile or prebuilt image reference to assess.")]
     if not ctx.dockerfile.froms:
         return [finding(EC030, Status.FAIL, "Dockerfile has no FROM instruction.", severity=Severity.MEDIUM)]
+    # FROM <stage> reuses an earlier build stage; it is not an image reference.
+    aliases: set[str] = set()
+    for instr in ctx.dockerfile.froms:
+        toks = instr.tokens()
+        for i, tok in enumerate(toks):
+            if tok.upper() == "AS" and i + 1 < len(toks):
+                aliases.add(toks[i + 1].lower())
     bad: list[dict] = []
     for instr in ctx.dockerfile.froms:
         toks = [t for t in instr.tokens() if not t.startswith("--")]
         if not toks:
             continue
         ref = toks[0]
-        if ref in ("scratch",) or "$" in ref:
+        if ref in ("scratch",) or "$" in ref or ref.lower() in aliases:
             continue
         has_digest, specific = image_ref_pinned(ref)
         if not has_digest:
@@ -790,6 +876,20 @@ def check_reward_production(c: CheckContext) -> list:
                     severity=Severity.HIGH, evidence={"entrypoints": entries})]
 
 
+def _is_assertion_call(node: ast.AST) -> bool:
+    """Assertion-equivalent calls: require(...), self.assert*(...),
+    assert_*(...), expect(...), pytest.raises(...).  Verifiers written with
+    raising helpers are not assertion-free."""
+    if not isinstance(node, ast.Call):
+        return False
+    fn = node.func
+    if isinstance(fn, ast.Name):
+        return fn.id in ("require", "expect", "check") or fn.id.startswith("assert")
+    if isinstance(fn, ast.Attribute):
+        return fn.attr.startswith("assert") or fn.attr in ("raises", "fail")
+    return False
+
+
 def _python_verifier_analysis(ctx) -> dict:
     info: dict = {"asserts": 0, "test_funcs": 0, "empty_test_funcs": [], "assert_true_only": False, "files": []}
     for f, text in _verifier_texts(ctx):
@@ -801,17 +901,38 @@ def _python_verifier_analysis(ctx) -> dict:
         except SyntaxError:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assert):
+            if isinstance(node, ast.Assert) or _is_assertion_call(node):
                 info["asserts"] += 1
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
                 info["test_funcs"] += 1
                 asserts_in = [n for n in ast.walk(node) if isinstance(n, ast.Assert)]
-                # pytest style also uses plain calls that raise; count assert + raising helpers coarsely
-                if not asserts_in:
+                has_assertion_call = any(_is_assertion_call(n) for n in ast.walk(node))
+                if not asserts_in and not has_assertion_call:
                     info["empty_test_funcs"].append(f"{f}:{node.name}")
-                elif all(isinstance(a.test, ast.Constant) and a.test.value is True for a in asserts_in):
+                elif asserts_in and all(isinstance(a.test, ast.Constant) and a.test.value is True for a in asserts_in) \
+                        and not has_assertion_call:
                     info["assert_true_only"] = True
     return info
+
+
+def _shell_line_guarded(lines: list[str], idx: int) -> bool:
+    """True when a shell line is plausibly conditional: guarded on its own
+    line (``&&``/``||``/``if``) or inside an if/case block.  File-wide
+    'there is an if somewhere' must not excuse an unconditional line."""
+    line = lines[idx]
+    if re.search(r"(&&|\|\||\bif\b.*\bthen\b|^\s*\[.*\]\s*&&)", line):
+        return True
+    depth = 0
+    for prev in lines[:idx]:
+        s = prev.strip()
+        if re.match(r"(if|elif)\b", s):
+            depth += 1
+        elif re.match(r"case\b", s):
+            depth += 1
+        # a one-line `if ...; fi` opens and closes on the same line
+        depth -= len(re.findall(r"(?:^|;)\s*(fi|esac)\b", s))
+        depth = max(0, depth)
+    return depth > 0
 
 
 @check(EC052)
@@ -820,10 +941,9 @@ def check_unconditional_success(c: CheckContext) -> list:
     hits: list = []
     for f, text in _verifier_texts(ctx):
         lines = text.splitlines()
-        has_condition = bool(re.search(r"(?m)^\s*(if|elif|else|case|pytest|python3?\s|bash\s|\[|test\s|! )", text))
         for i, line in enumerate(lines, 1):
             s = line.strip()
-            if re.search(r"echo\s+\"?1(\.0)?\"?\s*>\s*\S*reward\.txt", s) and not has_condition:
+            if re.search(r"echo\s+\"?1(\.0)?\"?\s*>\s*\S*reward\.txt", s) and not _shell_line_guarded(lines, i - 1):
                 hits.append({"path": f, "line": i, "pattern": "unconditional 'echo 1 > reward.txt'"})
             if re.search(r"sys\.exit\(0\)|exit\(0\)|return\s+1(\.0)?\s*$", s) and f.endswith("verifier.py"):
                 # only suspicious if no assert in file
@@ -849,7 +969,10 @@ def check_assertion_strength(c: CheckContext) -> list:
         return [not_applicable(EC053, "No verifier files to analyse.")]
     analysis = _python_verifier_analysis(ctx)
     shell_text = "\n".join(t for _f, t in _verifier_texts(ctx))
-    shell_checks = len(re.findall(r"(?m)(diff\s|cmp\s|\[\s|test\s|grep\s+-|==|pytest)", shell_text))
+    # Merely mentioning a test runner is not a check signal; count actual
+    # comparisons/assertions. `__name__ ==` guards are entrypoints, not tests.
+    shell_text_cmp = re.sub(r"__name__\s*==\s*['\"]__main__['\"]", "", shell_text)
+    shell_checks = len(re.findall(r"(?m)(diff\s|cmp\s|\[\s|test\s|grep\s+-|==)", shell_text_cmp))
     total_signals = analysis["asserts"] + shell_checks
     if analysis["assert_true_only"]:
         return [finding(EC053, Status.WARN, "The only Python assertion(s) are 'assert True'; the verifier cannot reject incorrect solutions.", severity=Severity.HIGH, evidence={"python": analysis}, confidence=Confidence.MEDIUM)]
@@ -867,21 +990,106 @@ def check_assertion_strength(c: CheckContext) -> list:
                    evidence={"python_asserts": analysis["asserts"], "shell_signals": shell_checks, "test_funcs": analysis["test_funcs"]})]
 
 
+SHELL_SELF_REPORT = [
+    re.compile(r"cat\s+\S*(reward|score|result|grade)\.(txt|json)"),
+    re.compile(r"(reward|score|grade)\s*=\s*\$?\(?\s*cat\s+\S+"),
+    re.compile(r"(reward|score|grade)\s*=\s*(float|int)\(\s*(open|Path)\("),
+    re.compile(r"\bcp\s+\S*(result|score|output)\S*\s+\S*reward\.(txt|json)"),
+    re.compile(r"\bmv\s+\S*(result|score)\S*\s+\S*reward\.(txt|json)"),
+]
+
+
 @check(EC054)
 def check_self_reported_reward(c: CheckContext) -> list:
     ctx = c.task
+    from envcert.checks.verifier_analysis import analyse_python
+
+    py_files = [(f, t) for f, t in _verifier_texts(ctx) if f.endswith(".py")]
+    analysis = analyse_python(py_files)
+    unvalidated = [h for h in analysis.self_reported if not h.validated]
+    validated = [h for h in analysis.self_reported if h.validated]
+    if unvalidated:
+        # LLM-judge flows parse a *judge's* verdict on agent output: worth
+        # review (judges are manipulable), but not the direct self-grading
+        # FAIL -- the reward is mediated, not agent-authored.
+        def _judge_mediated(h) -> bool:
+            text = f"{h.path} {h.function} {h.detail}".lower()
+            return "judge" in text or "llm" in text or "model_graded" in text
+
+        # FAIL is reserved for the direct idiom (reward parsed in the very
+        # expression that reads agent content).  Parsing a local helper's
+        # result is WARN: the helper may validate, which intra-procedural
+        # analysis cannot see.
+        direct = [h for h in unvalidated if h.direct_parse and not _judge_mediated(h)]
+        h = (direct or unvalidated)[0]
+        ev = {"hits": [x.to_dict() for x in unvalidated[:10]],
+              "validated_flows_ignored": len(validated), "method": "AST data-flow (sources: file/env/argv/stdin/subprocess; sinks: return/reward assignment/reward write)"}
+        if direct:
+            return [finding(EC054, Status.FAIL,
+                            f"Verifier parses its reward directly from agent-controlled content with no comparison against an expected value ({h.detail} at {h.path}:{h.line}). "
+                            "An agent that can write that content reports its own grade; compute the reward in the verifier or validate the value against expected output.",
+                            severity=Severity.HIGH, path=h.path, line=h.line, evidence=ev, confidence=Confidence.HIGH)]
+        return [finding(EC054, Status.WARN,
+                        f"Verifier derives its reward from agent-controlled content without an evident comparison against an expected value ({h.detail} at {h.path}:{h.line}); "
+                        "if the agent can influence that content it can influence its grade. Validate against expected values inside the verifier.",
+                        severity=Severity.HIGH, path=h.path, line=h.line, evidence=ev, confidence=Confidence.MEDIUM)]
     hits: list = []
     for f, text in _verifier_texts(ctx):
+        if f.endswith(".py"):
+            continue
         for i, line in enumerate(text.splitlines(), 1):
-            if re.search(r"cat\s+\S*(reward|score|result)\.(txt|json)", line) and "logs/verifier" not in line:
-                hits.append({"path": f, "line": i, "text": line.strip()[:140]})
-            if re.search(r"(reward|score)\s*=\s*(float|int)\(\s*(open|Path)\(", line):
+            if "logs/verifier" in line:
+                continue
+            if any(p.search(line) for p in SHELL_SELF_REPORT):
                 hits.append({"path": f, "line": i, "text": line.strip()[:140]})
     if hits:
         h = hits[0]
         return [finding(EC054, Status.WARN, f"Verifier appears to read a reward/score value from a file at {h['path']}:{h['line']} ('{h['text']}'); if that file is agent-writable, the agent can report its own grade. Verify the source is verifier-controlled and validated.",
-                        severity=Severity.HIGH, path=str(h["path"]), line=int(h["line"]), evidence={"hits": hits[:10]}, confidence=Confidence.LOW)]
-    return [passed(EC054, "Verifier does not obviously read its reward from an agent-produced file.")]
+                        severity=Severity.HIGH, path=str(h["path"]), line=int(h["line"]), evidence={"hits": hits[:10]}, confidence=Confidence.MEDIUM)]
+    note = f" ({len(validated)} agent-data flow(s) are compared against expected values before use)" if validated else ""
+    return [passed(EC054, f"Verifier does not derive its reward from unvalidated agent-controlled content (AST data-flow over {len(analysis.files_parsed)} Python verifier file(s)){note}.",
+                   evidence={"validated_flows": [x.to_dict() for x in validated[:5]]})]
+
+
+EC056 = CheckInfo("EC056", "Verifier does not execute or unsafely deserialise agent-influenced data", "verifier", Severity.HIGH,
+                  "eval/exec on dynamic input, pickle/yaml unsafe loading, os.system or subprocess shell=True inside the verifier turn agent-supplied data into code execution in the grading context.",
+                  "Remove eval/exec from the verifier; use json/ast.literal_eval and yaml SafeLoader; call subprocess with argument arrays (shell=False).",
+                  "Static AST inventory; whether the argument is agent-controlled at runtime needs the data-flow context in EC054 and human review.")
+
+
+@check(EC056)
+def check_verifier_dangerous_primitives(c: CheckContext) -> list:
+    ctx = c.task
+    if not _verifier_files(ctx):
+        return [not_applicable(EC056, "No verifier files to analyse.")]
+    from envcert.checks.verifier_analysis import analyse_python
+
+    py_files = [(f, t) for f, t in _verifier_texts(ctx) if f.endswith(".py")]
+    analysis = analyse_python(py_files)
+    shell_hits = []
+    for f, text in _verifier_texts(ctx):
+        if f.endswith(".py"):
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            # Only dynamic evaluation: eval of a variable/command result, or
+            # sh -c over an interpolated string.  `source .venv/bin/activate`
+            # and similar fixed-path sourcing are normal verifier setup.
+            if re.search(r"\beval\s+[\"']?\$|\beval\s+\$\(|\beval\s+`|\b(?:ba)?sh\s+-c\s+[\"'][^\"']*\$", line):
+                shell_hits.append({"path": f, "line": i, "text": line.strip()[:140]})
+    hits = analysis.dangerous
+    if hits:
+        h = hits[0]
+        return [finding(EC056, Status.WARN,
+                        f"Dangerous verifier primitive: {h.detail} at {h.path}:{h.line}. In the grading context this can turn agent-influenced data into code execution or verifier tampering.",
+                        severity=Severity.HIGH, path=h.path, line=h.line,
+                        evidence={"hits": [x.to_dict() for x in hits[:10]], "shell_hits": shell_hits[:5]},
+                        confidence=Confidence.MEDIUM)]
+    if shell_hits:
+        sh = shell_hits[0]
+        return [finding(EC056, Status.WARN, f"Verifier shell code evaluates dynamic content at {sh['path']}:{sh['line']} ('{sh['text']}'); review for agent-controlled code execution.",
+                        severity=Severity.MEDIUM, path=str(sh["path"]), line=int(sh["line"]), evidence={"shell_hits": shell_hits[:10]}, confidence=Confidence.LOW)]
+    return [passed(EC056, "No eval/exec, unsafe deserialisation or shell=True primitives found in the verifier.",
+                   evidence={"python_files": analysis.files_parsed})]
 
 
 @check(EC055)
@@ -910,7 +1118,7 @@ def register_all() -> list[CheckInfo]:
     return [REGISTRY[i][0] for i in
             ["EC001", "EC002", "EC003", "EC004", "EC010", "EC011", "EC012", "EC013", "EC014", "EC020", "EC021", "EC022",
              "EC023", "EC024", "EC030", "EC031", "EC032", "EC033", "EC040", "EC041", "EC050", "EC051", "EC052",
-             "EC053", "EC054", "EC055"]]
+             "EC053", "EC054", "EC055", "EC056"]]
 
 
 # importing this module registers checks; ensure registry import side-effect is explicit

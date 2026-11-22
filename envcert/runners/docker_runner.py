@@ -43,6 +43,30 @@ class DockerRunner(Runner):
         except Exception as exc:  # noqa: BLE001
             return RunnerInfo(self.name, False, f"docker probe failed: {exc}", "docker; not used")
 
+    @staticmethod
+    def _solve_step(variant: str) -> str:
+        """Shell executed as 'the agent' before the verifier runs.
+
+        Cheat variants are deterministic attacks an agent could attempt in a
+        shared agent/verifier environment: forging the reward file before
+        verification, and replacing the verifier entrypoint in the writable
+        task copy.  A sound verifier overwrites/ignores the forged reward and
+        runs verifier-owned tests, so both must score 0.
+        """
+        if variant == "gold":
+            return ("if [ -f /tmp/envcert-task/solution/solve.sh ]; then bash /tmp/envcert-task/solution/solve.sh; fi; ")
+        if variant == "cheat-reward-forge":
+            return ("mkdir -p /logs/verifier && echo 1 > /logs/verifier/reward.txt && "
+                    "printf '{\"reward\": 1}' > /logs/verifier/reward.json; "
+                    "echo 'envcert cheat: reward forged, no task work done'; ")
+        if variant == "cheat-test-tamper":
+            return ("for d in /tmp/envcert-task/tests /tests; do "
+                    "if [ -d \"$d\" ] && [ -w \"$d\" ]; then "
+                    "printf '#!/bin/bash\\nmkdir -p /logs/verifier\\necho 1 > /logs/verifier/reward.txt\\n' > \"$d/test.sh\"; "
+                    "chmod +x \"$d/test.sh\"; fi; done; "
+                    "echo 'envcert cheat: verifier tamper attempted, no task work done'; ")
+        return "echo 'envcert: no-op variant (solution skipped)'; "
+
     def run_harbor_task(self, task_root, timeout: int = 600, network: str = "none",
                         variant: str = "gold") -> RunResult:
         """Build environment/, run solution (gold only) then tests/test.sh, read reward.
@@ -78,13 +102,18 @@ class DockerRunner(Runner):
                     image_digest = insp.stdout.strip()
             except Exception:  # noqa: BLE001
                 image_digest = None
-            solve_step = ("if [ -f /tmp/envcert-task/solution/solve.sh ]; then bash /tmp/envcert-task/solution/solve.sh; fi; "
-                          if variant == "gold" else "echo 'envcert: no-op variant (solution skipped)'; ")
+            solve_step = self._solve_step(variant)
+            # Tests are snapshotted to a pristine location BEFORE the agent
+            # step runs and restored from it afterwards: the verifier owns
+            # its tests (as Harbor's upload does), so agent tampering with
+            # the writable task copy cannot reach verification.  EC066's
+            # cheat-test-tamper scenario proves this property per run.
             script = (
-                "mkdir -p /tmp/envcert-task /logs/verifier /tests && cp -a /envcert-task/. /tmp/envcert-task/ && "
+                "mkdir -p /tmp/envcert-task /logs/verifier /tests /tmp/envcert-pristine-tests && cp -a /envcert-task/. /tmp/envcert-task/ && "
                 "find /tmp/envcert-task -name '*.sh' -type f -exec sed -i 's/\\r$//' {} +; "
+                "cp -a /tmp/envcert-task/tests/. /tmp/envcert-pristine-tests/; "
                 + solve_step +
-                "cp -a /tmp/envcert-task/tests/. /tests/; "
+                "cp -a /tmp/envcert-pristine-tests/. /tests/; "
                 "bash /tests/test.sh; cat /logs/verifier/reward.txt 2>/dev/null || cat /logs/verifier/reward.json 2>/dev/null || echo NO_REWARD"
             )
             run = _run([exe, "run", "--rm", "--user", "root", "--network", network, "--cap-drop", "ALL",

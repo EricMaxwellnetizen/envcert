@@ -21,6 +21,50 @@ from envcert.runners.base import Runner, RunnerInfo, RunResult
 
 MAX_OUTPUT = 20000
 
+CHEAT_CONFTEST = '''"""EnvCert cheat-agent: agent-planted conftest that fakes test outcomes."""
+import pytest
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    report.outcome = "passed"
+    return report
+'''
+
+
+def stub_source(gold_file: Path) -> str:
+    """Generate a stub module preserving the gold file's public API.
+
+    Every function/method returns ``None`` and every class is kept (with
+    stub methods), so import-time structure survives but no real work is
+    done.  Unparseable gold degrades to an empty module.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(gold_file.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return "# envcert cheat stub (unparseable gold)\n"
+    lines = ["# envcert cheat stub: same API, no real work"]
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = ast.unparse(node.args) if hasattr(ast, "unparse") else "*args, **kwargs"
+            lines.append(f"def {node.name}({args}):")
+            lines.append("    return None")
+        elif isinstance(node, ast.ClassDef):
+            lines.append(f"class {node.name}:")
+            methods = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            if not methods:
+                lines.append("    pass")
+            for method in methods:
+                args = ast.unparse(method.args) if hasattr(ast, "unparse") else "*args, **kwargs"
+                lines.append(f"    def {method.name}({args}):")
+                lines.append("        return None")
+    if len(lines) == 1:
+        lines.append("pass")
+    return "\n".join(lines) + "\n"
+
 PYTEST_MISSING = ("pytest is not installed in the environment running EnvCert; "
                   "install pytest (pip install pytest) to use --execution local-python")
 
@@ -47,7 +91,15 @@ class LocalPythonRunner(Runner):
                           isolation="none: task code runs as the current user in a temp copy; use only on trusted tasks")
 
     def prepare_workspace(self, task_root: Path, dest: Path, solution_variant: str = "gold") -> Path:
-        """Copy tests/ (+ solution for gold) into dest. Variants: gold|noop|empty."""
+        """Copy tests/ (+ solution for gold) into dest.
+
+        Variants: gold | noop | empty | cheat-stub | cheat-tamper.
+        ``cheat-stub`` replaces the solution with an AST-generated stub that
+        keeps the gold API but returns constants; ``cheat-tamper`` submits a
+        no-op solution plus an agent-planted ``conftest.py`` that tries to
+        fake pytest outcomes -- the canonical agent-tampers-with-verifier
+        attack for pytest tasks run from an agent-writable directory.
+        """
         dest.mkdir(parents=True, exist_ok=True)
         for name in ("tests",):
             src = task_root / name
@@ -60,6 +112,13 @@ class LocalPythonRunner(Runner):
         elif solution_variant == "noop" and sol.is_dir():
             for f in sol.rglob("*.py"):
                 (dest / f.name).write_text("# envcert no-op negative control\n", encoding="utf-8")
+        elif solution_variant == "cheat-stub" and sol.is_dir():
+            for f in sol.rglob("*.py"):
+                (dest / f.name).write_text(stub_source(f), encoding="utf-8")
+        elif solution_variant == "cheat-tamper" and sol.is_dir():
+            for f in sol.rglob("*.py"):
+                (dest / f.name).write_text("# envcert cheat: no-op solution\n", encoding="utf-8")
+            (dest / "conftest.py").write_text(CHEAT_CONFTEST, encoding="utf-8")
         elif solution_variant == "empty":
             pass
         # also copy plain python modules at task root that tests may import

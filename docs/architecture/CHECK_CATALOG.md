@@ -176,6 +176,7 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Description: Reading a score/reward the agent itself wrote, or parsing agent stdout loosely, lets the agent report its own grade.
 - Remediation: Compute the reward inside the verifier from raw artifacts; validate any agent-produced file strictly.
 - Limitations: Heuristic; some tasks legitimately read agent output files — they must validate content, which needs human review.
+- Method (0.4.0): AST data-flow over Python verifiers (sources: file reads, environment, argv, stdin, subprocess stdout; sinks: return value, reward assignment, reward write). A reward *parsed* from agent-controlled content with no comparison against an expected value is FAIL with high confidence (e.g. `return float(open("result.txt").read())`); flows compared against expected/gold values before use are recognised as validation and pass. Shell verifiers use targeted patterns (reward read via `cat`, command substitution, copy/move into the reward file).
 
 ## EC055 - Inspect scorer is not trivially satisfiable
 
@@ -183,6 +184,13 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Description: Substring (includes) and loose match scorers accept outputs that merely mention the target; exact/structured or well-tested custom scorers are stronger.
 - Remediation: Prefer exact()/pattern() with anchored extraction or a custom scorer with negative tests; if includes/match is intentional, document why substring acceptance is semantically correct here.
 - Limitations: Scorer choice can be legitimate (e.g. short factual answers); this flags weakness patterns for review, not proof of exploitability.
+
+## EC056 - Verifier does not execute or unsafely deserialise agent-influenced data
+
+- Category: verifier  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: eval/exec on dynamic input, pickle/yaml unsafe loading, os.system or subprocess shell=True inside the verifier turn agent-supplied data into code execution in the grading context.
+- Remediation: Remove eval/exec from the verifier; use json/ast.literal_eval and yaml SafeLoader; call subprocess with argument arrays (shell=False).
+- Limitations: Static AST inventory; whether the argument is agent-controlled at runtime needs the data-flow context in EC054 and human review.
 
 ## EC060 - Reference (gold) solution passes the verifier
 
@@ -226,6 +234,14 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Remediation: Fix verify() so correct answers pass and incorrect/swapped answers fail for every probed row.
 - Limitations: local-python execution only (trusted code, no sandbox); probes up to 10 rows and the verify(response=..., task_data=...) convention.
 
+## EC066 - Deterministic cheat-agent battery is rejected by the verifier
+
+- Category: dynamic  |  Default severity on failure: CRITICAL  |  Dynamic: True
+- Description: Fixed cheat strategies (stub solution, verifier tampering, forged reward file) must not obtain a passing reward while the gold solution does.
+- Remediation: Make the verifier compute its reward from verifier-owned logic over raw artifacts: run tests from a verifier-owned directory, overwrite (never read) the reward file, and reject stub/constant submissions with substantive assertions (see EC053/EC054).
+- Limitations: Covers the listed deterministic strategies only; novel exploits need an adversarial (BenchJack-style) audit. local-python has no sandbox; docker scenarios assume the harness layout EnvCert documents.
+- Scenarios: `cheat-stub` and `cheat-tamper` (conftest outcome-faking) under local-python; `cheat-reward-forge` and `cheat-test-tamper` under docker. A cheat that passes while gold passes is an executed exploit (FAIL, high confidence), not a pattern match. When gold does not pass the battery is inconclusive (NOT_APPLICABLE).
+
 ## EC070 - Hadolint Dockerfile lint (external companion)
 
 - Category: external  |  Default severity on failure: MEDIUM  |  Dynamic: False
@@ -239,6 +255,48 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Description: Runs `trivy fs` (vuln+secret scanners) on the task directory when installed and --external-tools is given. May need network for its DB on first run.
 - Remediation: Update or replace flagged dependencies/images; do not treat a clean EnvCert static run as a CVE verdict.
 - Limitations: External tool output is mapped, not re-derived; the tool's own version and ruleset determine coverage.
+
+## EC080 - Dataset answers are not embedded in agent-visible prompts
+
+- Category: dataset  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: An expected answer that also appears verbatim in the prompt is leaked ground truth: the agent can copy it instead of solving the task.
+- Remediation: Remove the answer from the prompt/input fields; keep ground truth in verifier-owned fields only.
+- Limitations: Verbatim/normalised containment only; paraphrased leakage needs semantic review. Very short answers use explicit disclosure phrasing ("answer is X") to avoid flagging multiple-choice option lists.
+
+## EC081 - Dataset has no duplicate or near-duplicate rows
+
+- Category: dataset  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Exact duplicates, reused ids and near-identical prompts (especially with conflicting labels) inflate scores, leak across splits and corrupt training signal.
+- Remediation: Deduplicate prompts, make ids unique, and resolve label conflicts by re-adjudicating the row.
+- Limitations: Near-duplicates use word 5-gram Jaccard >= 0.9 over a bounded prompt sample; semantic duplicates need embedding review.
+
+## EC082 - Dataset splits do not share prompts (no train/test overlap)
+
+- Category: dataset  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: The same prompt in a train split and a test/eval split is contamination: test performance partly measures memorisation.
+- Remediation: Remove overlapping prompts from one split (conventionally from train) and re-issue the dataset version.
+- Limitations: Split membership is inferred from file names containing train/test/eval/dev/valid; unlabelled files return NOT_APPLICABLE.
+
+## EC083 - Dataset labels are not degenerate
+
+- Category: dataset  |  Default severity on failure: MEDIUM  |  Dynamic: False
+- Description: Constant, empty or single-class-dominated labels make any score meaningless and teach RLVR verifiers to accept anything.
+- Remediation: Fix labelling, drop empty-label rows, and rebalance or document intentional skew.
+- Limitations: Applies to the detected answer/label field; free-form generation datasets without labels return NOT_APPLICABLE.
+
+## EC084 - Dataset rows parse and carry their promised fields
+
+- Category: dataset  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Unparseable lines, missing prompts and missing labels silently shrink or corrupt the evaluated population.
+- Remediation: Repair or drop broken rows; keep prompt and label fields present on every row.
+- Limitations: Bounded to the first rows per file (cap recorded in evidence); field names are detected from common conventions.
+
+## EC085 - Dataset grading specifications are consistent (FAIL_TO_PASS/PASS_TO_PASS style)
+
+- Category: dataset  |  Default severity on failure: HIGH  |  Dynamic: False
+- Description: Test-graded instances grade by running named tests: an empty must-pass set grades nothing, and a test listed as both must-pass-after and must-pass-before makes the instance ungradeable.
+- Remediation: Give every instance a non-empty FAIL_TO_PASS set disjoint from PASS_TO_PASS; regenerate the instance if its test patch changed.
+- Limitations: Applies to SWE-bench-style rows carrying FAIL_TO_PASS/PASS_TO_PASS fields (JSON-encoded lists); other datasets return NOT_APPLICABLE.
 
 ## EC072 - Semgrep scan (external companion, task-provided rules only)
 

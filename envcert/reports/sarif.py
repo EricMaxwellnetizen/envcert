@@ -20,8 +20,12 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
             "properties": {"severity": info.severity.value, "category": info.category, "tags": ["envcert", info.category]},
         })
     results = []
+    import hashlib
+
     for f in report.get("findings", []):
-        if f["status"] not in ("FAIL", "WARN"):
+        # FAIL/WARN are code-scanning results; ERROR means a check could not
+        # run, which code scanning must surface rather than silently drop.
+        if f["status"] not in ("FAIL", "WARN", "ERROR"):
             continue
         loc: dict[str, Any] = {}
         if f.get("path"):
@@ -30,13 +34,19 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
             if f.get("line"):
                 region = {"startLine": f["line"]}
             loc = {"physicalLocation": {"artifactLocation": artifact_loc, **({"region": region} if region else {})}}
+        fingerprint = hashlib.sha256(
+            f"{f['check_id']}|{f.get('path')}|{f.get('line')}|{f['status']}|{f['severity']}".encode()
+        ).hexdigest()
         result: dict[str, Any] = {
             "ruleId": f["check_id"],
             "level": LEVEL.get(f["severity"], "warning"),
             "message": {"text": f["description"]},
             "locations": [loc] if loc else [],
+            "partialFingerprints": {"envcert/v1": fingerprint},
             "properties": {"status": f["status"], "confidence": f.get("confidence"), "evidence": f.get("evidence")},
         }
+        if f.get("remediation"):
+            result["fixes"] = [{"description": {"text": f["remediation"]}}]
         if f.get("baseline_suppressed"):
             result["suppressions"] = [{"kind": "external", "justification": "identical finding present in the EnvCert baseline report"}]
             result["properties"]["baseline_suppressed"] = True

@@ -41,6 +41,14 @@ inputs:
     description: Upload reports as workflow artifacts (true/false)
     required: false
     default: "true"
+  summary:
+    description: Append a Markdown findings summary to the GitHub step summary (true/false)
+    required: false
+    default: "true"
+  pr-comment:
+    description: Post or update a Markdown findings comment on the pull request (true/false; needs pull-requests: write permission)
+    required: false
+    default: "false"
 outputs:
   report:
     description: Path of the written report
@@ -87,6 +95,28 @@ runs:
           envcert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format sarif --output "$SARIF" || true
         fi
         exit "$status"
+    - name: Publish summary and PR comment
+      if: ${{ !cancelled() && (inputs.summary == 'true' || inputs.pr-comment == 'true') }}
+      shell: bash
+      env:
+        TASK_PATH: ${{ inputs.path }}
+        PROFILE: ${{ inputs.profile }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXECUTION: ${{ inputs.execution }}
+        WANT_SUMMARY: ${{ inputs.summary }}
+        WANT_COMMENT: ${{ inputs.pr-comment }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        md="$(mktemp envcert-summary-XXXXXX.md)"
+        envcert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format markdown --output "$md" || true
+        if [ "$WANT_SUMMARY" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          cat "$md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ "$WANT_COMMENT" = "true" ] && [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] && command -v gh >/dev/null 2>&1; then
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$md" --edit-last 2>/dev/null \
+            || gh pr comment "${{ github.event.pull_request.number }}" --body-file "$md" || true
+        fi
     - name: Upload reports
       if: ${{ inputs.upload-artifact == 'true' && !cancelled() }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -4,6 +4,79 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
+### Added
+- **Deterministic cheat-agent battery (EC066)**: fixed cheat strategies —
+  stub solution and agent-planted conftest outcome-faking (local-python),
+  forged reward file and verifier-entrypoint tampering (docker) — are
+  executed against the verifier. A cheat that passes while gold passes is
+  a proven false pass (FAIL, high confidence) with no LLM involved.
+- **Dataset-file auditing (EC080–EC085 + `dataset` adapter)**: `envcert
+  check data.jsonl` (also `.json`/`.csv`, or a directory of them) checks
+  answers embedded in prompts (including `hints_text`-style auxiliary
+  fields), exact/near duplicates and label conflicts, train/test split
+  overlap, degenerate labels, broken rows and inconsistent
+  FAIL_TO_PASS/PASS_TO_PASS grading specs. Field names are detected
+  across SWE-bench/NeMo/OpenAI-style conventions. NeMo Gym directories
+  keep their adapter. EC054 reports LLM-judge-mediated reward flows as
+  WARN rather than direct-self-grading FAIL.
+- **`envcert fix`**: deterministic, idempotent, dry-run-first remediation
+  (.dockerignore entries for .git/solution/answer material; declared
+  network/verifier-separation policies labelled *needs review*).
+- **`envcert new`**: scaffolds a Harbor task (separate verifier,
+  no-network, digest-pinned image, real assertions) that passes
+  `envcert check`.
+- **AST data-flow verifier analysis**: EC054 now tracks reward provenance
+  (file/env/argv/stdin/subprocess sources → return/reward sinks) and
+  fails on rewards parsed from agent-controlled content without
+  comparison against an expected value — including
+  `return float(open(...).read())`. EC056 inventories eval/exec, unsafe
+  deserialisation and `shell=True` in verifiers.
+- **Reports**: `--format markdown` (PR-ready) and `--format html`
+  (single self-contained file); SARIF gains partial fingerprints,
+  suggested fixes and ERROR results.
+- **Adoption surface**: GitHub Action step-summary and opt-in PR
+  comments; `.pre-commit-hooks.yaml`; third-party checks via the
+  `envcert.checks` entry-point group.
+- Registry snapshot for 0.4.x (42 checks); report schema admits the
+  `dataset` adapter.
+
+### Added (pre-release)
+- `.parquet` dataset files (via optional pyarrow; without it the file is
+  reported uninspectable as a WARN, never silently passed).
+- `envcert check --watch` re-runs a task check when its bundle digest
+  changes.
+- Hand-review round over every Terminal-Bench policy driver (see
+  docs/research/PILOT_040.md): EC054 trusts verifier-owned paths
+  (`/logs/verifier`, `/tests`), EC011 excludes instruction-declared
+  public inputs, EC010 matches `.git` component-exactly, EC053 counts
+  `require()`/`assert*` helpers, EC023 targets verifier/reward/system
+  paths only. Terminal-Bench: 47/51 pass after review.
+
+### Fixed
+- Real-world pilot false positives (Terminal-Bench, 51 rendered tasks):
+  EC056 no longer flags `source .venv/bin/activate` (only `eval`/`sh -c`
+  over interpolated content); EC054 no longer treats data-loading helper
+  returns as reward sinks; the Dockerfile parser ignores heredoc bodies
+  (`from pathlib import Path` is not a `FROM`) and EC030 ignores
+  build-stage aliases. Terminal-Bench policy pass rate on the pilot:
+  8/51 before these fixes, 32/51 after, with the remaining failures
+  driven by review-level findings (see docs/research/PILOT_040.md).
+- EC061 selected without EC060 now establishes its own gold baseline
+  (and is inconclusive when gold fails) instead of trusting check order.
+- Docker harness snapshots verifier tests to a pristine location before
+  the agent step and restores them after, modelling verifier-owned test
+  uploads; EC066's tamper scenario proves the property per run.
+- `--max-mutants` CLI control for the mutation budget; dataset rollups
+  support `--format markdown`; coverage gate set to 80%.
+- EC052: an `if` anywhere in a verifier no longer excuses an
+  unconditional `echo 1 > reward.txt`; conditionality is judged per line.
+- EC012: files the instruction itself hands to the agent as inputs are
+  no longer flagged on filename alone.
+- EC053: merely mentioning a test runner no longer counts as a check
+  signal, and `__name__ == "__main__"` guards are not assertions.
+
 ## [0.3.2] - 2026-11-22
 
 ### Fixed

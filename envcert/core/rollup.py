@@ -13,7 +13,7 @@ from typing import Any
 
 from envcert import REPORT_SCHEMA_VERSION, __version__
 from envcert.core.config import Settings
-from envcert.core.engine import run_checks
+from envcert.core.engine import run_checks, validate_check_selection
 
 MAX_DEPTH = 6
 
@@ -33,6 +33,7 @@ def find_task_folders(root: Path, max_depth: int = MAX_DEPTH) -> list[Path]:
 
 
 def run_dataset_rollup(dataset_root: Path, settings: Settings, adapter_name: str = "auto") -> dict[str, Any]:
+    validate_check_selection(settings)
     folders = find_task_folders(dataset_root)
     tasks: list[dict[str, Any]] = []
     for folder in folders:
@@ -73,6 +74,21 @@ def run_dataset_rollup(dataset_root: Path, settings: Settings, adapter_name: str
             "Each entry's full single-task report is under reports[<path>] and validates against the report schema.",
         ],
     }
+
+
+def rollup_to_markdown(rollup: dict[str, Any]) -> str:
+    s = rollup["summary"]
+    verdict = "PASSED ✅" if s["overall_policy_passed"] else "FAILED ❌"
+    lines = [f"## EnvCert {rollup['envcert_version']} dataset rollup — {verdict}", "",
+             f"**Dataset:** `{rollup['dataset']}` · {rollup['task_folders_found']} task folders · "
+             f"{s['policy_passed_tasks']}/{s['tasks']} pass policy", "",
+             "| Task | Adapter | Policy | Findings | Failing checks |", "|---|---|---|---|---|"]
+    for t in rollup["tasks"]:
+        findings = ", ".join(f"{k}:{v}" for k, v in sorted(t["by_status"].items()))
+        lines.append(f"| `{t['task']}` | {t['adapter']} | {'✅ PASS' if t['policy_passed'] else '❌ FAIL'} | "
+                     f"{findings} | {', '.join(t['failing_checks']) or '—'} |")
+    lines += ["", "_Rollup policy is the conjunction of per-task policies; there is no dataset score._", ""]
+    return "\n".join(lines)
 
 
 def rollup_to_text(rollup: dict[str, Any]) -> str:

@@ -22,16 +22,23 @@ def sha256_file(path: Path) -> str:
 
 
 def bundle_digest(root: Path, exclude_top: frozenset[str] = frozenset({".git"}),
-                  warnings: list[str] | None = None, max_files: int = 5000) -> tuple[str, int]:
+                  warnings: list[str] | None = None, max_files: int = 5000,
+                  only: list[str] | None = None) -> tuple[str, int]:
     """Deterministic digest over relative paths + file contents (symlinks hashed by target string).
 
     Unreadable files and truncation of the file listing are recorded in
     ``warnings`` when provided; they are never silently hashed as empty.
+    ``only`` restricts the digest to the named relative files (dataset
+    adapter: the bundle is the data files, not their whole parent directory).
     """
     h = hashlib.sha256()
     count = 0
     stats: dict = {}
-    for rel, path, is_link in iter_task_files(root, max_files=max_files, stats=stats):
+    if only is not None:
+        entries = [(rel, root / rel, (root / rel).is_symlink()) for rel in sorted(only)]
+    else:
+        entries = list(iter_task_files(root, max_files=max_files, stats=stats))
+    for rel, path, is_link in entries:
         if rel.split("/")[0] in exclude_top:
             continue
         count += 1

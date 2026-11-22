@@ -41,3 +41,15 @@ format and in-toto's published predicate types only.
   *repeatable CI evidence*. These are complementary; docs recommend running
   an adversarial audit (BenchJack-style) in addition to EnvCert for
   high-stakes benchmarks.
+
+## 0.4.0 update (2026-11-22, see PRODUCT_REVIEW.md)
+
+EnvCert 0.4.0 adds capabilities with no verified equivalent above:
+deterministic cheat-agent battery (EC066 — executed false-pass proof
+without an LLM), AST data-flow reward-provenance analysis (EC054/EC056),
+bare dataset-file auditing (EC080–EC084: answer leakage, duplicates,
+split overlap, degenerate labels), deterministic auto-remediation
+(`envcert fix`), task scaffolding (`envcert new`), Markdown/HTML
+reports, Action PR comments/step summaries, pre-commit hooks and
+entry-point plugin checks. The rows above predate 0.4.0 where they
+describe EnvCert as task-bundle-only or heuristic-only.

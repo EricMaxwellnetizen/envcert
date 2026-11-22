@@ -29,6 +29,7 @@ class TaskContext:
     verifier_paths: list[str] = field(default_factory=list)  # framework-specific verifier/scorer files (non-Harbor)
     steps: list[dict] = field(default_factory=list)  # multi-step: [{name, instruction, tests, solution}]
     dataset_files: list[str] = field(default_factory=list)
+    bundle_files: list[str] | None = None  # when set, the bundle digest covers exactly these files
     _text_cache: dict[str, str | None] = field(default_factory=dict, repr=False)
 
     def text(self, rel: str) -> str | None:

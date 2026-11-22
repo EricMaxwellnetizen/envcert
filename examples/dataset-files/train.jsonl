@@ -1,0 +1,4 @@
+{"id": "train-1", "prompt": "What is 17 + 25?", "answer": "42"}
+{"id": "train-2", "prompt": "Write a Python function that reverses a string.", "answer": "def rev(s): return s[::-1]"}
+{"id": "train-3", "prompt": "Which planet is known as the Red Planet?", "answer": "Mars"}
+{"id": "train-4", "prompt": "Sum the amount column: apples 10, pears 15, plums 17.", "answer": "42"}

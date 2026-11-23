@@ -341,7 +341,6 @@ def analyse_python(files: list[tuple[str, str]]) -> Analysis:
                     changed = True
             if not changed:
                 break
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                _analyse_function(path, node, out, local_funcs)
+        for func_node in func_nodes:
+            _analyse_function(path, func_node, out, local_funcs)
     return out

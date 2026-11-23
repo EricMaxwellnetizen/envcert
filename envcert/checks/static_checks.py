@@ -610,13 +610,18 @@ def check_writable_verifier(c: CheckContext) -> list:
         # target is the verifier/tests, the reward directory, or a system
         # path.  Targetless chmod (variable paths) stays flagged for review.
         targets = [t.strip("'\"") for t in re.split(r"\s+", line)
-                   if t.startswith("/") or "test" in t.lower() or "verifier" in t.lower()]
+                   if t.startswith("/") or "verifier" in t.lower()]
         if not targets:
             return True
-        return any(
-            "verifier" in t.lower() or "test" in t.lower()
-            or t.startswith(("/usr", "/etc", "/bin", "/sbin", "/var", "/opt", "/root"))
-            for t in targets)
+
+        def relevant(t: str) -> bool:
+            # Component-exact: /testbed is the agent's repo workspace in
+            # SWE-style tasks, not the verifier's /tests.
+            parts = [p for p in t.split("/") if p]
+            return any(p in ("tests", "verifier") or "verifier" in p for p in parts) \
+                or t.startswith(("/usr", "/etc", "/bin", "/sbin", "/var", "/opt", "/root"))
+
+        return any(relevant(t) for t in targets)
     for path, text in texts:
         for i, line in enumerate(text.splitlines(), 1):
             if re.search(r"chmod\s+(-[a-zA-Z]+\s+)*(777|a\+w|o\+w|ugo\+w)", line) or "privileged = true" in line:
@@ -729,8 +734,15 @@ def check_dangerous_dockerfile(c: CheckContext) -> list:
             hits.append((instr.line, "apt-get --allow-unauthenticated"))
     if hits:
         line, what = hits[0]
-        return [finding(EC032, Status.WARN, f"Dangerous build pattern at Dockerfile line {line}: {what}. Remote code executed at build time is unreviewed and unpinned.",
-                        severity=Severity.HIGH, path=(ctx.dockerfile_path.relative_to(ctx.root).as_posix() if ctx.dockerfile_path else None), line=line, evidence={"hits": [{"line": a, "pattern": b} for a, b in hits]})]
+        # A pipe-to-shell from a version-pinned URL (…/uv/0.7.13/install.sh)
+        # is still unreviewed remote code, but the version cannot drift
+        # silently the way an unversioned installer can: MEDIUM, not HIGH.
+        versioned = bool(re.search(r"/v?\d+\.\d+(?:\.\d+)?/", what)) and "pipe-to-shell" in what
+        sev = Severity.MEDIUM if versioned else Severity.HIGH
+        note = " The URL is version-pinned, which limits silent drift but does not verify content." if versioned else ""
+        return [finding(EC032, Status.WARN, f"Dangerous build pattern at Dockerfile line {line}: {what}. Remote code executed at build time is unreviewed and unpinned.{note}",
+                        severity=sev, path=(ctx.dockerfile_path.relative_to(ctx.root).as_posix() if ctx.dockerfile_path else None), line=line,
+                        evidence={"hits": [{"line": a, "pattern": b} for a, b in hits], "version_pinned_url": versioned})]
     return [passed(EC032, "No remote ADD, pipe-to-shell or unauthenticated package installs in the Dockerfile.")]
 
 
@@ -891,6 +903,10 @@ def _is_assertion_call(node: ast.AST) -> bool:
 
 
 def _python_verifier_analysis(ctx) -> dict:
+    cached = getattr(ctx, "_py_verifier_cache", None)
+    if cached is not None:
+        result: dict = cached
+        return result
     info: dict = {"asserts": 0, "test_funcs": 0, "empty_test_funcs": [], "assert_true_only": False, "files": []}
     for f, text in _verifier_texts(ctx):
         if not f.endswith(".py"):
@@ -912,6 +928,7 @@ def _python_verifier_analysis(ctx) -> dict:
                 elif asserts_in and all(isinstance(a.test, ast.Constant) and a.test.value is True for a in asserts_in) \
                         and not has_assertion_call:
                     info["assert_true_only"] = True
+    ctx._py_verifier_cache = info  # type: ignore[attr-defined]
     return info
 
 
@@ -990,6 +1007,20 @@ def check_assertion_strength(c: CheckContext) -> list:
                    evidence={"python_asserts": analysis["asserts"], "shell_signals": shell_checks, "test_funcs": analysis["test_funcs"]})]
 
 
+def _verifier_analysis(c: CheckContext):
+    """AST data-flow over the Python verifiers, computed once per run and
+    shared by EC054/EC056 (it is the most expensive static analysis)."""
+    cached = c.shared.get("verifier_analysis")
+    if cached is not None:
+        return cached
+    from envcert.checks.verifier_analysis import analyse_python
+
+    py_files = [(f, t) for f, t in _verifier_texts(c.task) if f.endswith(".py")]
+    analysis = analyse_python(py_files)
+    c.shared["verifier_analysis"] = analysis
+    return analysis
+
+
 SHELL_SELF_REPORT = [
     re.compile(r"cat\s+\S*(reward|score|result|grade)\.(txt|json)"),
     re.compile(r"(reward|score|grade)\s*=\s*\$?\(?\s*cat\s+\S+"),
@@ -1002,10 +1033,7 @@ SHELL_SELF_REPORT = [
 @check(EC054)
 def check_self_reported_reward(c: CheckContext) -> list:
     ctx = c.task
-    from envcert.checks.verifier_analysis import analyse_python
-
-    py_files = [(f, t) for f, t in _verifier_texts(ctx) if f.endswith(".py")]
-    analysis = analyse_python(py_files)
+    analysis = _verifier_analysis(c)
     unvalidated = [h for h in analysis.self_reported if not h.validated]
     validated = [h for h in analysis.self_reported if h.validated]
     if unvalidated:
@@ -1062,10 +1090,7 @@ def check_verifier_dangerous_primitives(c: CheckContext) -> list:
     ctx = c.task
     if not _verifier_files(ctx):
         return [not_applicable(EC056, "No verifier files to analyse.")]
-    from envcert.checks.verifier_analysis import analyse_python
-
-    py_files = [(f, t) for f, t in _verifier_texts(ctx) if f.endswith(".py")]
-    analysis = analyse_python(py_files)
+    analysis = _verifier_analysis(c)
     shell_hits = []
     for f, text in _verifier_texts(ctx):
         if f.endswith(".py"):

@@ -267,6 +267,36 @@ def test_ec056_flags_js_eval_in_verifier(task_factory):
     assert statuses(report, "EC056") == ["WARN"]
 
 
+def test_ec023_testbed_workspace_not_flagged(task_factory):
+    files = dict(BASIC)
+    files["environment/Dockerfile"] = (
+        "FROM python:3.12-slim@sha256:" + "a" * 64 + "\nWORKDIR /testbed\n"
+        "RUN chmod -R 777 /testbed\nUSER nobody\n")
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    assert statuses(report, "EC023") == ["PASS"]
+
+
+def test_ec032_versioned_installer_is_medium(task_factory):
+    files = dict(BASIC)
+    files["environment/Dockerfile"] = (
+        "FROM python:3.12-slim@sha256:" + "a" * 64 + "\n"
+        "RUN curl -LsSf https://astral.sh/uv/0.7.13/install.sh | sh\nUSER nobody\n")
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    hit = by_id(report)["EC032"][0]
+    assert hit["status"] == "WARN" and hit["severity"] == "MEDIUM"
+    files["environment/Dockerfile"] = (
+        "FROM python:3.12-slim@sha256:" + "a" * 64 + "\n"
+        "RUN curl -sSf https://sh.rustup.rs | sh -s -- -y\nUSER nobody\n")
+    import pathlib
+    import tempfile
+
+    from tests.conftest import make_task
+
+    root2 = make_task(pathlib.Path(tempfile.mkdtemp()), files)
+    hit = by_id(run_checks(root2, load_settings(None, None, None)))["EC032"][0]
+    assert hit["severity"] == "HIGH"
+
+
 def test_ec056_flags_eval_and_pickle_in_verifier(task_factory):
     task = _task_with_verifier(task_factory, (
         "import pickle\n"
@@ -523,6 +553,46 @@ def test_plugin_checks_load_via_entry_points(tmp_path, monkeypatch):
         assert statuses(report, "EC900") == ["PASS"]
     finally:
         REGISTRY.pop("EC900", None)
+
+
+def test_dataset_streaming_beyond_text_cap(tmp_path):
+    # A JSONL far past the 2MB bundle-text cap must be audited in full,
+    # not silently truncated to its head.
+    data = tmp_path / "big.jsonl"
+    filler = "x" * 3000
+    with data.open("w", encoding="utf-8") as fh:
+        for i in range(900):
+            fh.write(json.dumps({"id": str(i), "prompt": f"unique question {i} {filler}", "answer": f"a{i}"}) + "\n")
+    assert data.stat().st_size > 2_000_000
+    report = run_checks(data, load_settings(None, None, None), adapter_name="dataset")
+    ec001 = by_id(report)["EC001"][0]
+    assert "900 rows" in ec001["description"]
+    assert statuses(report, "EC084") == ["PASS"]
+
+
+def test_inspect_scorer_in_sibling_module_is_analysed(tmp_path):
+    root = tmp_path / "myeval"
+    root.mkdir()
+    (root / "myeval.py").write_text(
+        "from inspect_ai import Task, task\n"
+        "from inspect_ai.dataset import MemoryDataset, Sample\n"
+        "from inspect_ai.solver import generate\n"
+        "from scorer import strict_scorer\n\n"
+        "@task\n"
+        "def myeval():\n"
+        "    return Task(dataset=MemoryDataset([Sample(input='q', target='a')]), solver=generate(), scorer=strict_scorer())\n",
+        encoding="utf-8")
+    (root / "scorer.py").write_text(
+        "from inspect_ai.scorer import scorer, Score, Target\n\n"
+        "@scorer(metrics={'accuracy': 'mean'})\n"
+        "def strict_scorer():\n"
+        "    async def score(state, target):\n"
+        "        assert state.output.completion.strip() == target.text\n"
+        "        return Score(value=1.0)\n"
+        "    return score\n",
+        encoding="utf-8")
+    report = run_checks(root, load_settings(None, None, None), adapter_name="inspect")
+    assert statuses(report, "EC053") == ["PASS"]
 
 
 def test_dataset_example_files_pass():

@@ -4,6 +4,29 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-23
+
+### Fixed (scale campaign: 723 tasks, 2,294-row dataset, 131 evals)
+- **Dataset loader silently truncated files at 2MB** (the bundle text
+  cap): a 2,294-row SWE-bench file audited only its first 57 rows. The
+  loader now streams from disk (20k rows/file cap, recorded in
+  evidence); the full split audits in ~2s.
+- **Performance**: EC052/EC053/EC054/EC056 share one cached AST
+  analysis per run (cad-bench rollup 208s → 51s, identical findings).
+- **Inspect adapter** includes sibling scorer modules in verifier
+  analysis; assertion-free false alarms on inspect_evals dropped.
+- **EC023** matches chmod targets component-exactly (`/testbed` agent
+  workspace no longer reads as verifier `/tests`).
+- **EC032**: pipe-to-shell from a version-pinned URL is MEDIUM;
+  unversioned installers remain HIGH.
+
+### Added
+- Scale pilot (723 Hub/TB/Harbor tasks + full SWE-bench + 131 Inspect
+  evals) in docs/research/PILOT_SCALE.md, incl. the hand-verified
+  SWE-bench duplicate-instance finding (19 identical-issue pairs).
+- docs/architecture/ROADMAP.md; docs/research/QUALITY_AND_RELEASE.md;
+  SWE-ABS (ICML 2026) verified and positioned in the research docs.
+
 ## [0.4.2] - 2026-11-23
 
 ### Fixed

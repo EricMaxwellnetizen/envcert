@@ -53,7 +53,17 @@ def load(root: Path) -> TaskContext:
     ctx = TaskContext(root=root, adapter="inspect", task_name=root.name)
     scan_files(ctx)
     task_files = find_task_files(root, ctx.files)
-    ctx.verifier_paths = task_files
+    # Scorers usually live in sibling modules, not in the @task entry file;
+    # verifier-structure checks must see them or they report assertion-free
+    # verifiers for evals whose grading logic is simply in another file.
+    scorer_files: list[str] = []
+    for rel in ctx.files:
+        if not rel.endswith(".py") or rel in task_files:
+            continue
+        base = rel.rsplit("/", 1)[-1]
+        if "scorer" in base or "@scorer" in (ctx.text(rel) or ""):
+            scorer_files.append(rel)
+    ctx.verifier_paths = list(dict.fromkeys(task_files + scorer_files))
     ctx.dataset_files = [f for f in ctx.files if f.endswith((".jsonl", ".json", ".csv"))]
     if task_files:
         text = ctx.text(task_files[0]) or ""

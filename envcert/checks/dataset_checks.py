@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import io
 import json
 import re
 from collections import Counter, defaultdict
@@ -113,40 +112,61 @@ def load_dataset_rows(ctx) -> dict:
                 parse_errors += 1
             files[rel] = {"rows": rows, "parse_errors": parse_errors, "total_lines": total}
             continue
-        raw = ctx.text(rel)
-        if raw is not None:
-            if rel.lower().endswith(".csv"):
-                try:
-                    for row in csv.DictReader(io.StringIO(raw)):
-                        total += 1
-                        if total <= MAX_ROWS_PER_FILE:
-                            rows.append(dict(row))
-                except csv.Error:
-                    parse_errors += 1
-            elif rel.lower().endswith(".json") and raw.lstrip().startswith(("[", "{")) and "\n" not in raw.strip()[:1]:
+        # Stream from disk: dataset files routinely exceed the 2MB
+        # read_text_safe cap used for bundle text, and a truncated read
+        # would silently audit only the head of the file.
+        path = ctx.root / rel
+        try:
+            file_size = path.stat().st_size
+        except OSError:
+            file_size = 0
+        parsed_array = False
+        if rel.lower().endswith(".json") and file_size <= 25_000_000:
+            raw = ctx.text(rel)
+            if raw is not None and raw.lstrip().startswith("["):
                 try:
                     obj = json.loads(raw)
-                    items = obj if isinstance(obj, list) else obj.get("data") or obj.get("rows") or []
+                    items = obj if isinstance(obj, list) else []
                     total = len(items)
                     rows = [r for r in items[:MAX_ROWS_PER_FILE] if isinstance(r, dict)]
                     parse_errors = len(items) - len([r for r in items if isinstance(r, dict)])
+                    parsed_array = True
                 except ValueError:
                     parse_errors += 1
-            else:  # JSONL (and pretty JSON fallback: one object per line)
-                for line in raw.splitlines():
-                    if not line.strip():
-                        continue
-                    total += 1
+        if file_size > 25_000_000 and rel.lower().endswith(".json"):
+            ctx.warnings.append(f"dataset file {rel}: single-document JSON over 25MB is not streamable; convert to JSONL for a full audit")
+            parse_errors += 1
+            files[rel] = {"rows": rows, "parse_errors": parse_errors, "total_lines": total}
+            continue
+        try:
+            fh = None if parsed_array else path.open("r", encoding="utf-8", errors="replace", newline="")
+        except OSError:
+            fh = None
+        if fh is not None:
+            with fh:
+                if rel.lower().endswith(".csv"):
                     try:
-                        obj = json.loads(line)
-                    except ValueError:
+                        for row in csv.DictReader(fh):
+                            total += 1
+                            if total <= MAX_ROWS_PER_FILE:
+                                rows.append(dict(row))
+                    except csv.Error:
                         parse_errors += 1
-                        continue
-                    if isinstance(obj, dict):
-                        if total <= MAX_ROWS_PER_FILE:
-                            rows.append(obj)
-                    else:
-                        parse_errors += 1
+                else:  # JSONL: one object per line, streamed
+                    for line in fh:
+                        if not line.strip():
+                            continue
+                        total += 1
+                        try:
+                            obj = json.loads(line)
+                        except ValueError:
+                            parse_errors += 1
+                            continue
+                        if isinstance(obj, dict):
+                            if total <= MAX_ROWS_PER_FILE:
+                                rows.append(obj)
+                        else:
+                            parse_errors += 1
         for row in rows[:500]:
             pf = _first_field(row, PROMPT_FIELDS)
             af = _first_field(row, ANSWER_FIELDS)

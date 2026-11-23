@@ -66,6 +66,15 @@ def _path_is_trusted(node: ast.AST, trusted_vars: frozenset[str] = frozenset()) 
     return False
 
 
+# Absolute paths owned by the agent/workspace rather than the verifier
+# framework.  A constant command that references one of these is executing an
+# agent-controlled artifact and stays HIGH; an unrelated constant command is
+# downgraded to MEDIUM (risky, but not demonstrably agent-influenced).
+AGENT_PATH_ROOTS = (
+    "/app", "/workspace", "/testbed", "/solution", "/root", "/home",
+)
+
+
 @dataclass
 class FlowHit:
     path: str
@@ -76,13 +85,14 @@ class FlowHit:
     numeric_parse: bool = False
     validated: bool = False
     direct_parse: bool = False  # reward parsed in the same expression that reads it
+    severity: str = "HIGH"  # "HIGH" | "MEDIUM"
 
     def to_dict(self) -> dict:
         return {
             "path": self.path, "line": self.line, "kind": self.kind,
             "detail": self.detail, "function": self.function,
             "numeric_parse": self.numeric_parse, "validated": self.validated,
-            "direct_parse": self.direct_parse,
+            "direct_parse": self.direct_parse, "severity": self.severity,
         }
 
 
@@ -356,6 +366,19 @@ def _analyse_function(path: str, fn: ast.FunctionDef | ast.AsyncFunctionDef,
                         direct_parse=_contains_direct_parse(node.args[0], tainted, trusted, summary, module)))
 
 
+def _constant_string(node: ast.AST) -> str | None:
+    """Return the string value if ``node`` is a constant string literal."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _references_agent_path(text: str) -> bool:
+    """True if a constant command text references an agent-writable path."""
+    low = text.replace("\\", "/")
+    return any(root in low for root in AGENT_PATH_ROOTS)
+
+
 def _dangerous_hits(path: str, tree: ast.Module, out: Analysis) -> None:
     for node in _walk(tree):
         if not isinstance(node, ast.Call):
@@ -367,11 +390,28 @@ def _dangerous_hits(path: str, tree: ast.Module, out: Analysis) -> None:
             out.dangerous.append(FlowHit(path, node.lineno, f"{name}-dynamic",
                                          f"{name}() called on a non-constant expression in the verifier"))
         elif qual in ("os.system", "os.popen") or name in ("system", "popen"):
-            out.dangerous.append(FlowHit(path, node.lineno, "os-shell",
-                                         "verifier shells out via os.system/os.popen"))
+            cmd = _constant_string(node.args[0]) if node.args else None
+            if cmd is None:
+                out.dangerous.append(FlowHit(path, node.lineno, "os-shell",
+                                             "verifier shells out via os.system/os.popen with a non-constant command"))
+            elif _references_agent_path(cmd):
+                out.dangerous.append(FlowHit(path, node.lineno, "os-shell-agent",
+                                             f"constant shell command references an agent-writable path: {cmd[:80]}"))
+            else:
+                h = FlowHit(path, node.lineno, "os-shell-constant",
+                            f"constant shell command (not agent-influenced): {cmd[:80]}")
+                h.severity = "MEDIUM"
+                out.dangerous.append(h)
         elif name in ("load", "loads") and qual.startswith("pickle"):
-            out.dangerous.append(FlowHit(path, node.lineno, "pickle-load",
-                                         "verifier unpickles data (arbitrary code execution if agent-controlled)"))
+            arg = _constant_string(node.args[0]) if node.args else None
+            if arg is None or _references_agent_path(arg):
+                out.dangerous.append(FlowHit(path, node.lineno, "pickle-load",
+                                             "verifier unpickles data (arbitrary code execution if agent-controlled)"))
+            else:
+                h = FlowHit(path, node.lineno, "pickle-load-constant",
+                            "verifier unpickles a constant path not under an agent-writable root")
+                h.severity = "MEDIUM"
+                out.dangerous.append(h)
         elif name == "load" and qual.startswith("yaml"):
             safe = any(k.arg == "Loader" and "Safe" in ast.dump(k.value) for k in node.keywords)
             if not safe:
@@ -380,8 +420,18 @@ def _dangerous_hits(path: str, tree: ast.Module, out: Analysis) -> None:
         elif qual.startswith("subprocess.") or name in ("run", "Popen", "call", "check_output"):
             if any(k.arg == "shell" and isinstance(k.value, ast.Constant) and k.value.value is True
                    for k in node.keywords):
-                out.dangerous.append(FlowHit(path, node.lineno, "subprocess-shell-true",
-                                             "subprocess called with shell=True in the verifier"))
+                cmd = _constant_string(node.args[0]) if node.args else None
+                if cmd is None:
+                    out.dangerous.append(FlowHit(path, node.lineno, "subprocess-shell-true",
+                                                 "subprocess called with shell=True and a non-constant command"))
+                elif _references_agent_path(cmd):
+                    out.dangerous.append(FlowHit(path, node.lineno, "subprocess-shell-true-agent",
+                                                 f"subprocess shell=True references an agent-writable path: {cmd[:80]}"))
+                else:
+                    h = FlowHit(path, node.lineno, "subprocess-shell-true-constant",
+                                f"subprocess shell=True with a constant command: {cmd[:80]}")
+                    h.severity = "MEDIUM"
+                    out.dangerous.append(h)
 
 
 def _module_names(path: str) -> list[str]:

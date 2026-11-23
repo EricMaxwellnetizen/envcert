@@ -806,6 +806,82 @@ def check_dependencies(c: CheckContext) -> list:
     return [passed(EC040, "No unpinned pip/requirements entries detected.", evidence={"lockfile_present": has_lock})]
 
 
+def _command_units(text: str) -> list[tuple[int, str]]:
+    """Split shell/Dockerfile text into logical command units.
+
+    Lines ending with ``\\`` are continuations and are joined into the unit
+    that began with the first physical line of the group.  A pin that lands
+    anywhere in the same ``RUN`` block (e.g. ``git clone ... && git reset
+    --hard <sha>``) therefore counts.  Returns ``(start_line, unit_text)``.
+    """
+    units: list[tuple[int, str]] = []
+    buf: list[str] = []
+    start = 1
+    for i, raw in enumerate(text.splitlines(), 1):
+        line = raw.rstrip()
+        is_cont = line.endswith("\\")
+        content = line[:-1] if is_cont else line
+        if is_cont:
+            if not buf:
+                start = i
+            buf.append(content)
+            continue
+        if buf:
+            buf.append(content)
+            units.append((start, " ".join(buf)))
+            buf = []
+            start = i + 1
+        else:
+            stripped = content.strip()
+            if stripped and not stripped.startswith("#"):
+                units.append((i, content))
+    if buf:
+        units.append((start, " ".join(buf)))
+    return units
+
+
+def _strip_shell_strings(unit: str) -> str:
+    """Remove double- and single-quoted shell string literals so that a
+    command keyword appearing inside ``echo "..."`` is not mistaken for an
+    actual command."""
+    out: list[str] = []
+    i = 0
+    n = len(unit)
+    while i < n:
+        ch = unit[i]
+        if ch == '"':
+            j = i + 1
+            while j < n and unit[j] != '"':
+                if unit[j] == "\\":
+                    j += 1
+                j += 1
+            i = j + 1 if j < n else n
+        elif ch == "'":
+            j = unit.find("'", i + 1)
+            i = j + 1 if j != -1 else n
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _is_pinned_clone(unit: str) -> bool:
+    """True if a git-clone unit is pinned to an explicit commit or branch."""
+    # strong pin: reset/checkout to a commit hash (7-40 hex)
+    if re.search(r"\b(?:reset\s+--hard|checkout)\s+[0-9a-f]{7,40}\b", unit):
+        return True
+    # weak pin: clone directly onto a named branch/tag (--branch/-b )
+    # lookbehind (?<!\w) because "--branch" starts with '-', so \b would fail
+    # when preceded by a space.
+    if re.search(r"(?<!\w)(--branch|-b)\s+\S+", unit):
+        return True
+    return False
+
+
+def _has_checksum(unit: str) -> bool:
+    return bool(re.search(r"sha256|checksum", unit, re.IGNORECASE))
+
+
 @check(EC041)
 def check_downloads(c: CheckContext) -> list:
     ctx = c.task
@@ -816,14 +892,18 @@ def check_downloads(c: CheckContext) -> list:
         text = ctx.text(f)
         if not text:
             continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if re.search(r"git\s+clone\s", line) and not re.search(r"(--branch|--depth|checkout\s+[0-9a-f]{40})", line):
-                # clone followed by checkout in same file counts as pinned; checked coarsely below
-                if "checkout" not in text:
-                    hits.append({"path": f, "line": i, "kind": "git clone without pinned commit/branch", "text": line.strip()[:120]})
-            if re.search(r"(curl|wget)\s+.*https?://", line) and "sha256" not in text and "checksum" not in text.lower():
-                if "|" not in line:  # pipe-to-shell handled by EC032
-                    hits.append({"path": f, "line": i, "kind": "download without checksum verification in file", "text": line.strip()[:120]})
+        for lineno, unit in _command_units(text):
+            code = _strip_shell_strings(unit)
+            if re.search(r"git\s+clone\s", code):
+                if not _is_pinned_clone(code):
+                    hits.append({"path": f, "line": lineno,
+                                 "kind": "git clone without pinned commit",
+                                 "text": unit.strip()[:140]})
+            if re.search(r"(curl|wget)\s+.*https?://", code):
+                if "|" not in code and not _has_checksum(code):  # pipe-to-shell handled by EC032
+                    hits.append({"path": f, "line": lineno,
+                                 "kind": "download without checksum verification",
+                                 "text": unit.strip()[:140]})
     if hits:
         h = hits[0]
         return [finding(EC041, Status.WARN, f"Unpinned/unverified external download at {h['path']}:{h['line']} ({h['kind']}).",
@@ -1107,9 +1187,15 @@ def check_verifier_dangerous_primitives(c: CheckContext) -> list:
     hits = analysis.dangerous
     if hits:
         h = hits[0]
+        sev = Severity.HIGH if h.severity == "HIGH" else Severity.MEDIUM
+        kind = h.kind
+        agent_influenced = kind.endswith("-agent") or kind.endswith("-dynamic")
+        detail = ("verifier executes agent-influenced code: "
+                  if agent_influenced else "verifier runs a fixed primitive: ")
         return [finding(EC056, Status.WARN,
-                        f"Dangerous verifier primitive: {h.detail} at {h.path}:{h.line}. In the grading context this can turn agent-influenced data into code execution or verifier tampering.",
-                        severity=Severity.HIGH, path=h.path, line=h.line,
+                        f"Dangerous verifier primitive: {detail}{h.detail} at {h.path}:{h.line}. "
+                        f"{'This is agent-controlled code execution.' if agent_influenced else 'Confirm the invoked program is verifier-owned.'}",
+                        severity=sev, path=h.path, line=h.line,
                         evidence={"hits": [x.to_dict() for x in hits[:10]], "shell_hits": shell_hits[:5]},
                         confidence=Confidence.MEDIUM)]
     if shell_hits:

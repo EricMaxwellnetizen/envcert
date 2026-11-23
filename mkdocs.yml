@@ -29,12 +29,14 @@ nav:
       - 0.4.0 pilot: research/PILOT_040.md
       - Scale pilot: research/PILOT_SCALE.md
       - Quality & release: research/QUALITY_AND_RELEASE.md
+      - Industry readiness: research/INDUSTRY_READINESS.md
       - Public-environment pilot: research/PUBLIC_ENVIRONMENT_PILOT.md
   - Demo reports:
       - Safe task: demo/report-safe.md
       - Vulnerable task: demo/report-vulnerable.md
       - Dynamic + cheat battery: demo/report-dynamic.md
   - Releases:
+      - v0.4.5: releases/v0.4.5.md
       - v0.4.4: releases/v0.4.4.md
       - v0.4.3: releases/v0.4.3.md
       - v0.4.2: releases/v0.4.2.md

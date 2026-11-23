@@ -84,7 +84,11 @@ def load(root: Path) -> TaskContext:
         if (env_dir / "Dockerfile").is_file():
             load_dockerfile(ctx, "environment/Dockerfile", "environment")
         elif (env_dir / "docker-compose.yaml").is_file() or (env_dir / "docker-compose.yml").is_file():
-            ctx.warnings.append("environment uses docker-compose; Dockerfile-specific checks are limited")
+            compose = env_dir / "docker-compose.yaml"
+            if not compose.is_file():
+                compose = env_dir / "docker-compose.yml"
+            ctx.compose_path = compose
+            ctx.warnings.append("environment uses docker-compose; Dockerfile-specific checks are limited (dynamic execution supported)")
     return ctx
 
 

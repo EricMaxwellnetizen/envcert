@@ -11,7 +11,6 @@ from envcert.checks.base import CheckContext, CheckInfo, check, finding, not_app
 from envcert.core.models import Severity, Status
 from envcert.runners.docker_runner import DockerRunner
 from envcert.runners.local_runner import LocalPythonRunner
-from envcert.runners.nemo_probe import probe_verifier
 
 EC060 = CheckInfo("EC060", "Reference (gold) solution passes the verifier", "dynamic", Severity.HIGH,
                   "Executing the reference solution should produce the expected (passing) reward.",
@@ -26,17 +25,17 @@ EC062 = CheckInfo("EC062", "Verifier outcome is repeatable across repetitions", 
                   "Remove nondeterminism (time, randomness, network, ordering) from the task or verifier.",
                   "Compares reward/exit outcome, not bitwise-identical stdout.", dynamic=True)
 EC065 = CheckInfo("EC065", "NeMo verifier probing with mutated inputs (gold/wrong/swapped answers)", "dynamic", Severity.HIGH,
-                  "Feeding a NeMo Gym verify() its rows' expected answers should score 1; mutated and row-swapped answers should score < 1.",
-                  "Fix verify() so correct answers pass and incorrect/swapped answers fail for every probed row.",
-                  "local-python execution only (trusted code, no sandbox); probes up to 10 rows and the verify(response=..., task_data=...) convention.", dynamic=True)
+                  "Feeding a NeMo Gym verifier its rows' expected answers should score 1; mutated and row-swapped answers should score < 1.",
+                  "Fix the verifier so correct answers pass and incorrect/swapped answers fail for every probed row.",
+                  "Probes up to 10 rows. Local mode imports verify() in a subprocess (trusted code, no sandbox); HTTP mode POSTs to an operator-supplied Resources-Server endpoint (--nemo-endpoint) and reads reward/score.", dynamic=True)
 EC064 = CheckInfo("EC064", "Shell-solution mutation: verifier rejects mutated reference solutions (docker)", "mutation", Severity.MEDIUM,
                   "Mutating literal outputs in solution/solve.sh should make the verifier reject the run; surviving mutants signal a weak verifier.",
                   "Strengthen verifier assertions on the mutated outputs.",
                   "Docker execution only; only literal-bearing shell solutions can be mutated. Mutant validity is heuristic.", dynamic=True)
 EC063 = CheckInfo("EC063", "Mutation testing: verifier rejects mutated (incorrect) solutions", "mutation", Severity.MEDIUM,
-                  "Mutated variants of a correct Python solution should be rejected; the rejection rate is a verifier-strength signal.",
+                  "Mutated variants of a correct solution should be rejected; the rejection rate is a verifier-strength signal.",
                   "Add assertions covering the mutated behaviour; do not treat the rate as proof of correctness.",
-                  "Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest tasks only.", dynamic=True)
+                  "Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest and JS/TS (node) tasks under --execution local-python.", dynamic=True)
 
 
 def _is_python_task(ctx) -> bool:
@@ -45,14 +44,23 @@ def _is_python_task(ctx) -> bool:
     return has_py_solution and has_py_tests
 
 
+def _is_js_task(ctx) -> bool:
+    js = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
+    has_solution = any(f.startswith("solution/") and f.endswith(js) for f in ctx.files)
+    has_tests = any(f.startswith("tests/") and f.endswith(js) for f in ctx.files)
+    return has_solution and has_tests
+
+
 def _run_variant(c: CheckContext, variant: str):
     ctx = c.task
     if c.execution == "docker":
         env_cfg = ctx.config.get("environment") or {}
         declared_image = env_cfg.get("docker_image") if isinstance(env_cfg, dict) else None
+        compose = ctx.compose_path if ctx.compose_path is not None else None
         result = DockerRunner().run_harbor_task(
             ctx.root, variant=variant,
-            image=str(declared_image) if declared_image and not ctx.dockerfile_path else None)
+            image=str(declared_image) if declared_image and not ctx.dockerfile_path and compose is None else None,
+            compose=str(compose) if compose is not None else None)
         if result.image_digest:
             c.shared["image_digest"] = result.image_digest
         if result.image_digest_note:
@@ -192,11 +200,18 @@ def check_repeatability(c: CheckContext) -> list:
 def check_mutation(c: CheckContext) -> list:
     if not c.enable_mutation:
         return [not_run(EC063, "Mutation testing is opt-in: re-run with --mutation (and --execution local-python).")]
-    if c.execution != "local-python" or not _is_python_task(c.task):
-        return [not_applicable(EC063, "Mutation testing in this version supports pytest-style Python tasks under --execution local-python only.")]
-    from envcert.checks.mutation import run_mutation
+    if c.execution != "local-python":
+        return [not_applicable(EC063, "Mutation testing runs under --execution local-python (trusted tasks, no sandbox) for Python/pytest or JS/TS node tasks.")]
+    if _is_python_task(c.task):
+        from envcert.checks.mutation import run_mutation
 
-    report = run_mutation(c.task.root, max_mutants=c.max_mutants)
+        report = run_mutation(c.task.root, max_mutants=c.max_mutants)
+    elif _is_js_task(c.task):
+        from envcert.checks.mutation_js import run_js_mutation
+
+        report = run_js_mutation(c.task.root, max_mutants=c.max_mutants)
+    else:
+        return [not_applicable(EC063, "Mutation testing needs solution/*.py + tests/test_*.py (pytest) or solution/*.js|.ts + tests/*.js|.ts (node).")]
     if report.get("error"):
         return [finding(EC063, Status.ERROR, f"Mutation testing could not run: {report['error']}",
                         severity=Severity.INFO, evidence={"error": report["error"], "runner": c.execution})]
@@ -207,6 +222,7 @@ def check_mutation(c: CheckContext) -> list:
           "invalid": report["invalid"], "uncovered_inconclusive": report.get("uncovered", 0),
           "execution_errors": report.get("errors", 0),
           "coverage_used": report.get("coverage_used", False),
+          "language": report.get("language", "python"),
           "rejection_rate": rate, "mutants": report["mutants"][:20]}
     if rate is not None and rate < 0.5:
         return [finding(EC063, Status.WARN, f"Mutation rejection rate is {rate:.0%} ({report['rejected']}/{report['eligible']}); most incorrect variants survive, so the verifier is weak for the mutated behaviour.",
@@ -287,19 +303,33 @@ def check_shell_mutation(c: CheckContext) -> list:
 @check(EC065)
 def check_nemo_probe(c: CheckContext) -> list:
     ctx = c.task
-    if c.execution == "none":
-        return [not_run(EC065, "Dynamic probing is opt-in: re-run with --execution local-python (trusted verifier code only).")]
+    if c.execution == "none" and not c.nemo_endpoint:
+        return [not_run(EC065, "Dynamic probing is opt-in: re-run with --execution local-python (trusted verifier code only) or supply --nemo-endpoint for an HTTP Resources Server.")]
     if ctx.adapter != "nemo-gym":
-        return [not_applicable(EC065, "Verifier probing applies to NeMo Gym datasets with a shared verify().")]
-    if c.execution != "local-python":
-        return [not_applicable(EC065, "NeMo probing is implemented for --execution local-python; use the external runner protocol for sandboxed probing.")]
-    if not ctx.verifier_paths or not ctx.dataset_files:
-        return [not_applicable(EC065, "Probing needs verifier.py plus JSONL rows with expected answers.")]
-    result = probe_verifier(ctx.root, ctx.verifier_paths[0], ctx.dataset_files[0])
+        return [not_applicable(EC065, "Verifier probing applies to NeMo Gym datasets with a shared verify() or an HTTP Resources Server.")]
+    if not ctx.dataset_files:
+        return [not_applicable(EC065, "Probing needs JSONL rows with expected answers.")]
+    if c.nemo_endpoint:
+        from envcert.runners.nemo_probe import probe_http_verifier
+
+        result = probe_http_verifier(c.nemo_endpoint, ctx.root, ctx.dataset_files[0],
+                                     headers=dict(c.nemo_headers or {}))
+        runner = "http resources server"
+        endpoint = c.nemo_endpoint.split("?", 1)[0]
+    else:
+        if c.execution != "local-python":
+            return [not_applicable(EC065, "NeMo probing needs --execution local-python for a local verify() or --nemo-endpoint for an HTTP Resources Server.")]
+        if not ctx.verifier_paths:
+            return [not_applicable(EC065, "No verifier.py found; use --nemo-endpoint to probe an HTTP Resources Server.")]
+        from envcert.runners.nemo_probe import probe_verifier
+
+        result = probe_verifier(ctx.root, ctx.verifier_paths[0], ctx.dataset_files[0])
+        runner = "local-python (no sandbox)"
+        endpoint = ""
     if result.error and result.reward is None:
         # probe errors that still scored rows surface via stdout payload; treat hard errors as ERROR
         return [finding(EC065, Status.ERROR, f"Verifier probing could not run: {result.error}",
-                        severity=Severity.INFO, evidence={"error": result.error})]
+                        severity=Severity.INFO, evidence={"error": result.error, "runner": runner})]
     import json as _json
 
     try:
@@ -308,15 +338,25 @@ def check_nemo_probe(c: CheckContext) -> list:
         payload = {}
     rows = payload.get("results", [])
     scored = [r for r in rows if r.get("gold") is not None]
-    ev = {"rows_probed": len(scored), "results": rows[:10], "runner": "local-python (no sandbox)"}
+    ev = {"rows_probed": len(scored), "results": rows[:10], "runner": runner}
+    if endpoint:
+        ev["endpoint"] = endpoint
     if not scored:
-        return [finding(EC065, Status.ERROR, "Verifier probing scored no rows (missing expected answers or verify() raised).",
+        return [finding(EC065, Status.ERROR, "Verifier probing scored no rows (missing expected answers or the verifier raised).",
                         severity=Severity.INFO, evidence=ev)]
     gold_bad = [r for r in scored if r["gold"] < 1.0]
     mutant_survived = [r for r in scored if r.get("mutant") is not None and r["mutant"] >= 1.0]
     swap_survived = [r for r in scored if r.get("swap") is not None and r["swap"] >= 1.0]
+    inconclusive = [r for r in scored if r.get("mutant") is None
+                    or (r.get("swap") is None and not r.get("swap_na"))]
     if gold_bad:
-        return [finding(EC065, Status.FAIL, f"verify() rejects its own expected answer on {len(gold_bad)}/{len(scored)} probed rows; the verifier or dataset is broken.", evidence=ev)]
+        hint = (" Confirm the endpoint accepts {\"response\", \"task_data\"} and returns reward/score."
+                if runner == "http resources server" else "")
+        return [finding(EC065, Status.FAIL, f"The verifier rejects its own expected answer on {len(gold_bad)}/{len(scored)} probed rows; the verifier or dataset is broken.{hint}", evidence=ev)]
     if mutant_survived or swap_survived:
-        return [finding(EC065, Status.WARN, f"verify() accepts mutated answers on {len(mutant_survived)} row(s) and swapped answers on {len(swap_survived)} row(s); it is too weak.", severity=Severity.HIGH, evidence=ev)]
-    return [passed(EC065, f"verify() accepts expected answers and rejects mutated/swapped answers on all {len(scored)} probed rows.", evidence=ev)]
+        return [finding(EC065, Status.WARN, f"The verifier accepts mutated answers on {len(mutant_survived)} row(s) and swapped answers on {len(swap_survived)} row(s); it is too weak.", severity=Severity.HIGH, evidence=ev)]
+    if inconclusive:
+        return [finding(EC065, Status.WARN,
+                        f"The verifier accepted expected answers but {len(inconclusive)}/{len(scored)} mutant or swapped probes were inconclusive (transport error or no score); re-run to complete the weak-verifier check.",
+                        severity=Severity.MEDIUM, evidence=ev)]
+    return [passed(EC065, f"The verifier accepts expected answers and rejects mutated/swapped answers on all {len(scored)} probed rows ({runner}).", evidence=ev)]

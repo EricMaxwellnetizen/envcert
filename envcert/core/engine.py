@@ -222,7 +222,9 @@ def run_checks(task_path: Path, settings: Settings, adapter_name: str = "auto") 
     check_ctx = CheckContext(task=ctx, execution=settings.execution, repetitions=settings.repetitions,
                              enable_mutation=settings.enable_mutation, max_mutants=settings.max_mutants,
                              external_tools=external_tools,
-                             runner_command=settings.runner_command)
+                             runner_command=settings.runner_command,
+                             nemo_endpoint=settings.nemo_endpoint,
+                             nemo_headers=dict(settings.nemo_headers))
     image_digest, image_note = resolve_image_digest(settings)
     if image_note and settings.image and "not a registry manifest digest" in image_note:
         ctx.warnings.append(f"image digest: {image_note}")

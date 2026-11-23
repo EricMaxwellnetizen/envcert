@@ -10,9 +10,11 @@ unavailable and dynamic checks return NOT_RUN/ERROR — never a fake PASS.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -75,8 +77,137 @@ class DockerRunner(Runner):
                     "echo 'envcert cheat: verifier tamper attempted, no task work done'; ")
         return "echo 'envcert: no-op variant (solution skipped)'; "
 
+    @staticmethod
+    def _compose_config(exe: str, compose_path, project: str) -> dict:
+        try:
+            proc = _run([exe, "compose", "-f", str(compose_path), "-p", project,
+                         "config", "--format", "json"], 60)
+        except Exception:  # noqa: BLE001
+            return {}
+        if proc.returncode != 0:
+            return {}
+        try:
+            data = json.loads(proc.stdout)
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _write_compose_override(path, services: list[str], network: str) -> None:
+        """Hardening override merged onto the task's compose file.
+
+        cap-drop/no-new-privileges/resource limits apply to every service.
+        With network="none" the project's default network is marked
+        internal: services can still talk to each other but cannot reach
+        the outside world (Harbor's default no-network policy).
+        """
+        lines = ["services:"]
+        for name in services:
+            lines += [
+                f"  {json.dumps(name)}:",
+                "    cap_drop: [ALL]",
+                "    security_opt:",
+                "      - no-new-privileges:true",
+                "    mem_limit: 2g",
+                "    cpus: 2",
+                "    pids_limit: 256",
+            ]
+        if network == "none":
+            lines += ["networks:", "  default:", "    internal: true"]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _run_compose(self, root, compose_path, exe: str, timeout: int,
+                     network: str, variant: str) -> RunResult:
+        from pathlib import Path
+
+        project = f"envcert-{os.getpid()}-{uuid.uuid4().hex[:12]}"
+        start = time.time()
+        config = self._compose_config(exe, compose_path, project)
+        services = sorted((config.get("services") or {}).keys()) if config else []
+        if not services:
+            try:
+                proc = _run([exe, "compose", "-f", str(compose_path), "-p", project,
+                             "config", "--services"], 60)
+                services = sorted({ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()})
+            except Exception:  # noqa: BLE001
+                services = []
+        if not services:
+            return RunResult(ok=False, error="docker compose config listed no services")
+        service = "main" if "main" in services else services[0]
+        files: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="envcert-compose-") as td:
+            override = Path(td) / "envcert-override.yaml"
+            self._write_compose_override(override, services, network)
+            files = ["-f", str(compose_path), "-f", str(override)]
+            note = (f"compose: {len(services)} service(s), ran '{service}'; cap-drop ALL, "
+                    "no-new-privileges and 2g/2cpu/256pid limits applied"
+                    + ("; default network is internal (no external egress)" if network == "none" else ""))
+            try:
+                build = _run([exe, "compose", *files, "-p", project, "build"], min(timeout, 900))
+                if build.returncode != 0:
+                    return RunResult(ok=False, error="docker compose build failed",
+                                     stderr=(build.stderr or "")[-MAX_OUTPUT:],
+                                     duration_sec=round(time.time() - start, 3))
+                image_digest = None
+                try:
+                    imgs = _run([exe, "compose", *files, "-p", project, "images", "-q", service], 60)
+                    first = next((ln.strip() for ln in (imgs.stdout or "").splitlines() if ln.strip()), "")
+                    if first.startswith("sha256:"):
+                        image_digest = first
+                except Exception:  # noqa: BLE001
+                    image_digest = None
+                solve_step = self._solve_step(variant)
+                script = (
+                    "mkdir -p /tmp/envcert-task /logs/verifier /tests /tmp/envcert-pristine-tests && cp -a /envcert-task/. /tmp/envcert-task/ && "
+                    "find /tmp/envcert-task -name '*.sh' -type f -exec sed -i 's/\\r$//' {} +; "
+                    "cp -a /tmp/envcert-task/tests/. /tmp/envcert-pristine-tests/; "
+                    + solve_step +
+                    "cp -a /tmp/envcert-pristine-tests/. /tests/; "
+                    "bash /tests/test.sh; cat /logs/verifier/reward.txt 2>/dev/null || cat /logs/verifier/reward.json 2>/dev/null || echo NO_REWARD"
+                )
+                run = _run([exe, "compose", *files, "-p", project, "run", "--rm", "-T",
+                            "-u", "root", "-v", f"{root}:/envcert-task:ro", "-w", "/",
+                            service, "bash", "-lc", script], timeout)
+                out = (run.stdout or "")[-MAX_OUTPUT:]
+                reward = None
+                for line in reversed(out.strip().splitlines()):
+                    try:
+                        reward = float(line.strip().strip("{}").split(":")[-1].strip().strip('"'))
+                        break
+                    except ValueError:
+                        continue
+                return RunResult(ok=run.returncode == 0, exit_code=run.returncode,
+                                 stdout=(note + "\n" + out)[-MAX_OUTPUT:],
+                                 stderr=(run.stderr or "")[-MAX_OUTPUT:], reward=reward,
+                                 duration_sec=round(time.time() - start, 3), image_digest=image_digest,
+                                 image_digest_note=(
+                                     "compose service image; image_digest is the local image ID, "
+                                     "not a registry manifest digest") if image_digest else "")
+            except subprocess.TimeoutExpired:
+                return RunResult(ok=False, error=f"docker compose execution timed out after {timeout}s",
+                                 duration_sec=float(timeout))
+            except Exception as exc:  # noqa: BLE001
+                return RunResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+            finally:
+                try:
+                    if files:
+                        _run([exe, "compose", *files, "-p", project, "down", "-v", "--remove-orphans"], 120)
+                except Exception:  # noqa: BLE001
+                    pass
+                built = [name for name, svc in (config.get("services") or {}).items()
+                         if isinstance(svc, dict) and svc.get("build")]
+                for name in built:
+                    try:
+                        imgs = _run([exe, "compose", *files, "-p", project, "images", "-q", name], 60)
+                        for image_id in {ln.strip() for ln in (imgs.stdout or "").splitlines() if ln.strip()}:
+                            if image_id.startswith("sha256:"):
+                                _run([exe, "image", "rm", "-f", image_id], 60)
+                    except Exception:  # noqa: BLE001
+                        pass
+
     def run_harbor_task(self, task_root, timeout: int = 600, network: str = "none",
-                        variant: str = "gold", image: str | None = None) -> RunResult:
+                        variant: str = "gold", image: str | None = None,
+                        compose: str | None = None) -> RunResult:
         """Build environment/, run solution (gold only) then tests/test.sh, read reward.
 
         variant="noop" skips the reference solution entirely — the negative
@@ -84,7 +215,10 @@ class DockerRunner(Runner):
         do-nothing agent would get.  With ``image`` (a task-declared
         prebuilt image), no Dockerfile is built: the image is pulled and
         used as-is, which is how Harbor tasks that declare
-        ``[environment] docker_image`` run.
+        ``[environment] docker_image`` run.  With ``compose`` (a task
+        docker-compose file), the project is built and the verifier runs in
+        the ``main`` service (or the first service) under a hardening
+        override.
         """
         from pathlib import Path
 
@@ -92,10 +226,15 @@ class DockerRunner(Runner):
         if not info.available:
             return RunResult(ok=False, error=info.reason)
         root = Path(task_root).resolve()
+        exe = shutil.which("docker") or "docker"
+        if compose is not None:
+            compose_path = Path(compose).resolve()
+            if not compose_path.is_file():
+                return RunResult(ok=False, error=f"compose file not found: {compose_path}")
+            return self._run_compose(root, compose_path, exe, timeout, network, variant)
         dockerfile = root / "environment" / "Dockerfile"
         if not image and not dockerfile.is_file():
             return RunResult(ok=False, error="no environment/Dockerfile to build and no prebuilt image declared")
-        exe = shutil.which("docker") or "docker"
         # Unique per process and invocation: two concurrent checks in the same
         # second must not build/run/delete the same tag.
         tag = image or f"envcert-check-{os.getpid()}-{uuid.uuid4().hex[:12]}"

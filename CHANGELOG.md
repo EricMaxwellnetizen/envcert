@@ -4,6 +4,28 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-23
+
+### Added
+- **Compose-project execution**: Harbor tasks using
+  `environment/docker-compose.yaml|yml` now run EC060/EC061/EC062/EC066
+  under a generated hardening override (`cap_drop: [ALL]`,
+  `no-new-privileges`, 2g/2cpu/256pid per service; default network
+  `internal` when network is none).
+- **Cross-module EC054 summaries**: validation/agent-data summaries
+  resolve through `from x import y` and `import x as y`, completing the
+  call-graph work from 0.4.4.
+- **NeMo HTTP Resources-Server probing (EC065)**: opt-in
+  `--nemo-endpoint` / `[checks.nemo]` posts gold, mutated and swapped
+  answers with bounded rows, wall clock and response size; headers are
+  never echoed into evidence.
+- **Semantic near-duplicates (EC081)**: deterministic token-set cosine
+  (>= 0.82) alongside 5-gram Jaccard; conflicting labels escalate.
+- **JS/TS mutation (EC063)**: comment/string-aware lexer mutants run by
+  `node` (tsx/ts-node for TypeScript).
+- docs/research/INDUSTRY_READINESS.md: deployment envelope, proven
+  scale evidence, guarantees/limits, adoption and release checklists.
+
 ## [0.4.4] - 2026-11-23
 
 ### Added

@@ -25,6 +25,7 @@ class TaskContext:
     tests_dir: Path | None = None
     solution_dir: Path | None = None
     environment_dir: Path | None = None
+    compose_path: Path | None = None
     warnings: list[str] = field(default_factory=list)
     verifier_paths: list[str] = field(default_factory=list)  # framework-specific verifier/scorer files (non-Harbor)
     steps: list[dict] = field(default_factory=list)  # multi-step: [{name, instruction, tests, solution}]

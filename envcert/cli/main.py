@@ -133,6 +133,7 @@ def cmd_check(args) -> int:
         "runner_command": getattr(args, "runner_command", None),
         "external_tools": getattr(args, "external_tools", False),
         "baseline": getattr(args, "baseline", None),
+        "nemo_endpoint": getattr(args, "nemo_endpoint", None),
     })
     if getattr(args, "watch", False):
         if getattr(args, "dataset", False):
@@ -715,8 +716,10 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--enable", action="append", default=None, help="only run this check ID (repeatable)")
     pc.add_argument("--disable", action="append", default=None, help="skip this check ID (repeatable)")
     pc.add_argument("--repetitions", type=int, default=None, help="repetitions for dynamic repeatability (default 3)")
-    pc.add_argument("--mutation", action="store_true", help="enable mutation testing (local-python pytest tasks only)")
+    pc.add_argument("--mutation", action="store_true", help="enable mutation testing (local-python; Python/pytest or JS/TS node tasks)")
     pc.add_argument("--max-mutants", type=int, default=None, help="mutant budget for mutation testing (1-200, default 10)")
+    pc.add_argument("--nemo-endpoint", default=None,
+                    help="NeMo Gym Resources-Server URL for HTTP verifier probing (EC065; sends gold/mutated answers to the endpoint)")
     pc.add_argument("--quiet", action="store_true", help="suppress the stderr summary when --output is used")
     pc.add_argument("--watch", action="store_true", help="re-run the check whenever the task bundle changes (terminal output, Ctrl-C to stop)")
     pc.add_argument("--watch-interval", type=int, default=5, help="seconds between watch polls (default 5)")

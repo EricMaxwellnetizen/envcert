@@ -22,11 +22,15 @@ and runs:
 
 - EC080 — expected answer embedded verbatim in the agent-visible prompt;
 - EC081 — exact duplicates, reused ids, near-duplicate prompts
-  (word 5-gram Jaccard ≥ 0.9) and label conflicts on identical prompts;
+  (word 5-gram Jaccard ≥ 0.9) plus deterministic token-set cosine
+  semantic near-duplicates (≥ 0.82 over discriminative content tokens)
+  and label conflicts;
 - EC082 — the same prompt in more than one split (split inferred from
   `train`/`test`/`eval`/`dev`/`valid` in file names): contamination;
 - EC083 — empty, constant or ≥98%-dominant labels;
-- EC084 — unparseable rows and rows missing their prompt/label fields.
+- EC084 — unparseable rows and rows missing their prompt/label fields;
+- EC085 — SWE-bench-style `FAIL_TO_PASS`/`PASS_TO_PASS` grading specs:
+  empty must-pass sets and tests listed as both before and after.
 
 Plus EC013 (hard-coded secrets in rows) and EC001 structure. Row caps
 (20,000/file analysed, near-duplicate sampling) are recorded in the

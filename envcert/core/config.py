@@ -53,6 +53,8 @@ class Settings:
     external_tools: bool = False      # run hadolint/trivy/semgrep companions when installed
     baseline: str | None = None       # previous report: identical findings are suppressed from policy
     max_mutants: int = 10             # mutant budget for EC063/EC064
+    nemo_endpoint: str | None = None  # NeMo Gym Resources-Server URL for HTTP verifier probing
+    nemo_headers: dict[str, str] = field(default_factory=dict)
 
     def fail_on_names(self) -> list[str]:
         return sorted((s.value for s in self.fail_on), key=lambda v: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].index(v))
@@ -149,6 +151,18 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
                 dynamic_requested = True
         if "repetitions" in dyn:
             s.repetitions = _parse_repetitions(dyn["repetitions"], "[checks.dynamic]")
+        nemo = _table(checks, "nemo", "[checks.nemo]")
+        endpoint = nemo.get("endpoint")
+        if endpoint is not None:
+            if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
+                raise ConfigError("[checks.nemo] endpoint must be an http:// or https:// URL")
+            s.nemo_endpoint = endpoint
+        headers = nemo.get("headers")
+        if headers is not None:
+            if not isinstance(headers, dict) or not all(
+                    isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+                raise ConfigError("[checks.nemo] headers must be a table of string values")
+            s.nemo_headers = dict(headers)
     policy = _table(data, "policy", "[policy]")
     if policy.get("fail_on") is not None:
         s.fail_on = _parse_fail_on(policy["fail_on"], "[policy]")
@@ -210,6 +224,11 @@ def load_settings(config_path: Path | None, profile: str | None, overrides: dict
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
                 raise ConfigError("--max-mutants must be an integer between 1 and 200")
             s.max_mutants = value
+        if overrides.get("nemo_endpoint"):
+            value = str(overrides["nemo_endpoint"])
+            if not value.startswith(("http://", "https://")):
+                raise ConfigError("--nemo-endpoint must be an http:// or https:// URL")
+            s.nemo_endpoint = value
     if s.execution not in ("none", "docker", "local-python", "external"):
         raise ConfigError(f"unknown execution mode {s.execution!r}; expected none, docker, local-python or external")
     if dynamic_requested and s.execution == "none":

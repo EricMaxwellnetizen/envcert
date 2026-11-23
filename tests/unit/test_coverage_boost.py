@@ -3,6 +3,7 @@ no cosign binary and no network."""
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from envcert.attestations.intoto import build_statement, verify_statement_local
 from envcert.core.config import load_settings
@@ -124,6 +125,45 @@ def test_docker_runner_prebuilt_image_skips_build(monkeypatch, tmp_path):
     verbs = [c[1] for c in calls if len(c) > 1]
     assert "pull" in verbs and "build" not in verbs and "rmi" not in verbs
     assert "prebuilt" in (result.image_digest_note or "")
+
+
+def test_docker_runner_compose_hardens_and_cleans_up(monkeypatch, tmp_path):
+    compose = tmp_path / "environment" / "docker-compose.yaml"
+    compose.parent.mkdir()
+    compose.write_text(
+        "services:\n  main:\n    build:\n      context: .\n      dockerfile: Dockerfile\n",
+        encoding="utf-8")
+    (tmp_path / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    calls = []
+    override_text = {}
+
+    def fake_run(cmd, timeout):
+        calls.append(cmd)
+        if "config" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='{"services": {"main": {"build": {"context": "."}}}}', stderr="")
+        if "images" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="sha256:" + "e" * 64 + "\n", stderr="")
+        if "run" in cmd:
+            files = [cmd[i + 1] for i, part in enumerate(cmd) if part == "-f"]
+            override_text["text"] = Path(files[1]).read_text(encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="done\n1\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(docker_runner, "_run", fake_run)
+    monkeypatch.setattr(docker_runner.shutil, "which", lambda _: "docker")
+    result = docker_runner.DockerRunner().run_harbor_task(
+        tmp_path, variant="gold", compose=str(compose))
+    assert result.reward == 1.0
+    assert "compose:" in result.stdout and "internal" in result.stdout
+    assert "cap_drop: [ALL]" in override_text["text"]
+    assert "internal: true" in override_text["text"]
+    run_cmd = next(c for c in calls if "run" in c)
+    assert "--rm" in run_cmd and "-T" in run_cmd and "-u" in run_cmd
+    assert any(str(tmp_path) in part for part in run_cmd)
+    down_cmd = next(c for c in calls if "down" in c)
+    assert "--remove-orphans" in down_cmd and "-v" in down_cmd
 
 
 def test_docker_runner_rejects_windows_containers_engine(monkeypatch):

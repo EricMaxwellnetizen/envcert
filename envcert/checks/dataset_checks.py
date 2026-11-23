@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import re
 from collections import Counter, defaultdict
 
@@ -39,7 +40,7 @@ EC080 = CheckInfo("EC080", "Dataset answers are not embedded in agent-visible pr
 EC081 = CheckInfo("EC081", "Dataset has no duplicate or near-duplicate rows", "dataset", Severity.MEDIUM,
                   "Exact duplicates, reused ids and near-identical prompts (especially with conflicting labels) inflate scores, leak across splits and corrupt training signal.",
                   "Deduplicate prompts, make ids unique, and resolve label conflicts by re-adjudicating the row.",
-                  "Near-duplicates use word 5-gram Jaccard >= 0.9 over a bounded prompt sample; semantic duplicates need embedding review.")
+                  "Near-duplicates use word 5-gram Jaccard >= 0.9 and deterministic token-set cosine >= 0.82 over a bounded prompt sample; embedding-level paraphrases still need review.")
 EC082 = CheckInfo("EC082", "Dataset splits do not share prompts (no train/test overlap)", "dataset", Severity.HIGH,
                   "The same prompt in a train split and a test/eval split is contamination: test performance partly measures memorisation.",
                   "Remove overlapping prompts from one split (conventionally from train) and re-issue the dataset version.",
@@ -253,6 +254,96 @@ def _shingles(text: str, n: int = 5) -> set[str]:
     return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
 
 
+STOPWORDS = frozenset("""
+a an and are as at be been being but by can could did do does doing for from had has have
+having he her here hers him his how i if in into is it its itself just me more most my no
+nor not now of off on once only or other our out over own same she should so some such than
+that the their them then there these they this those through to too under until up very was
+we were what when where which while who whom why will with would you your
+""".split())
+
+
+def _tokens(text: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9_]{2,}", _norm(text)) if w not in STOPWORDS]
+
+
+MAX_TOKENS_PER_DOC = 256
+
+
+def _semantic_pairs(prompts: list[str], answers: list[str], threshold: float = 0.82,
+                    max_candidates: int = 100_000) -> tuple[int, int, list[dict]]:
+    """Deterministic token-set cosine near-duplicate detection (stdlib only).
+
+    Catches reordered/lightly reworded prompts that 5-gram Jaccard misses,
+    without embeddings or a model download.  Documents are reduced to sets
+    of content tokens; similarity is the binary cosine
+    ``|A & B| / sqrt(|A| * |B|)`` over *discriminative* tokens only (those
+    with document frequency <= 100 and <= 20% of the sample), so boilerplate
+    words cannot make two different prompts look alike.
+
+    Candidate pairs come from an inverted index over those tokens, rarest
+    first, and are bounded by ``max_candidates`` so pathological data stays
+    linear-ish.  Returns (pair_count, conflicting_label_pairs, examples).
+    """
+    n = len(prompts)
+    if n < 2:
+        return 0, 0, []
+    docs = [set(_tokens(p)) for p in prompts]
+    df: Counter = Counter()
+    for toks in docs:
+        df.update(toks)
+    max_df = max(2, int(n * 0.2))
+    index: dict[str, list[int]] = defaultdict(list)
+    sizes: list[int] = []
+    for i, toks in enumerate(docs):
+        qualifying = {t for t in toks if df[t] <= max_df and df[t] <= 100}
+        if len(qualifying) > MAX_TOKENS_PER_DOC:
+            # Keep the rarest (most discriminative) tokens, deterministically.
+            qualifying = set(sorted(qualifying, key=lambda t: (df[t], t))[:MAX_TOKENS_PER_DOC])
+        sizes.append(len(qualifying))
+        for tok in qualifying:
+            index[tok].append(i)
+    # Normalise once: comparing two candidates must not re-normalise megabytes
+    # of text per pair.
+    norms = [_norm(p) for p in prompts]
+    pair_shared: Counter = Counter()
+    # Rarest tokens first: the most discriminative candidate pairs survive
+    # the budget even on large samples.
+    for tok in sorted(index, key=lambda t: (len(index[t]), t)):
+        rows = index[tok]
+        if len(rows) > 100:
+            continue
+        for a in range(len(rows)):
+            for b in range(a + 1, len(rows)):
+                pair_shared[(rows[a], rows[b])] += 1
+                if len(pair_shared) >= max_candidates:
+                    break
+            if len(pair_shared) >= max_candidates:
+                break
+        if len(pair_shared) >= max_candidates:
+            break
+    pairs = 0
+    conflicting = 0
+    examples: list[dict] = []
+    for (a, b), shared in pair_shared.items():
+        if shared < 2 or sizes[a] == 0 or sizes[b] == 0:
+            continue
+        if norms[a] == norms[b]:
+            continue  # exact duplicates are counted separately
+        sim = shared / math.sqrt(sizes[a] * sizes[b])
+        if sim < threshold:
+            continue
+        pairs += 1
+        label_conflict = bool(answers[a]) and bool(answers[b]) and _norm(answers[a]) != _norm(answers[b])
+        if label_conflict:
+            conflicting += 1
+        if len(examples) < 10:
+            examples.append({"a": a, "b": b, "similarity": round(sim, 3),
+                             "conflicting_labels": label_conflict})
+    examples.sort(key=lambda e: -e["similarity"])
+    return pairs, conflicting, examples
+
+
 @check(EC081)
 def check_duplicates(c: CheckContext) -> list:
     ctx = c.task
@@ -265,11 +356,13 @@ def check_duplicates(c: CheckContext) -> list:
     by_hash: dict[str, list] = defaultdict(list)
     by_id: Counter = Counter()
     prompts: list[str] = []
+    answers: list[str] = []
     for rel, idx, row in _all_rows(data):
         prompt = _prompt_of(row, pf)
         if not prompt:
             continue
         prompts.append(prompt)
+        answers.append(_answer_of(row, af))
         by_hash[_prompt_hash(prompt)].append((rel, idx, _answer_of(row, af)))
         id_field = _first_field(row, ID_FIELDS)
         if id_field:
@@ -298,9 +391,15 @@ def check_duplicates(c: CheckContext) -> list:
                 sa, sb = shingle_sets[pair[0]], shingle_sets[pair[1]]
                 if sa and sb and len(sa & sb) / len(sa | sb) >= 0.9:
                     near_pairs += 1
+    semantic_pairs, semantic_conflicts, semantic_examples = _semantic_pairs(
+        sample, answers[:MAX_PROMPTS_NEAR_DUP])
     ev = {"rows": len(prompts), "exact_duplicate_rows": exact_dup_rows, "conflicting_label_groups": len(conflicts),
           "duplicate_ids": len(dup_ids), "near_duplicate_pairs_sampled": near_pairs,
-          "near_dup_sample_cap": MAX_PROMPTS_NEAR_DUP}
+          "near_dup_sample_cap": MAX_PROMPTS_NEAR_DUP,
+          "semantic_duplicate_pairs_sampled": semantic_pairs,
+          "semantic_conflicting_label_pairs": semantic_conflicts,
+          "semantic_examples": semantic_examples,
+          "semantic_similarity_threshold": 0.82}
     problems = []
     if exact_dup_rows:
         problems.append(f"{exact_dup_rows} exact duplicate prompt row(s)")
@@ -310,9 +409,12 @@ def check_duplicates(c: CheckContext) -> list:
         problems.append(f"{len(dup_ids)} reused id value(s)")
     if near_pairs:
         problems.append(f"{near_pairs} near-duplicate prompt pair(s) (Jaccard >= 0.9, sampled)")
+    if semantic_pairs:
+        problems.append(f"{semantic_pairs} semantically near-duplicate prompt pair(s) (token-set cosine >= 0.82, sampled)")
     if problems:
+        severity = Severity.HIGH if (conflicts or semantic_conflicts) else Severity.MEDIUM
         return [finding(EC081, Status.WARN, "Dataset duplication: " + "; ".join(problems) + ". Duplicates inflate measured performance and can carry answers across splits.",
-                        severity=Severity.HIGH if conflicts else Severity.MEDIUM, evidence=ev, confidence=Confidence.HIGH)]
+                        severity=severity, evidence=ev, confidence=Confidence.HIGH)]
     return [passed(EC081, f"No exact/near duplicates, id reuse or label conflicts across {len(prompts)} rows.", evidence=ev)]
 
 

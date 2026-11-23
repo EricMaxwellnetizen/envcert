@@ -58,6 +58,37 @@ def test_docker_prebuilt_image_task(tmp_path):
     assert statuses["EC066"] == "PASS"
 
 
+def test_docker_compose_task_executes_and_hardens(tmp_path):
+    # A Harbor compose task: the runner builds the project, runs the
+    # verifier in the `main` service under a hardening override, and tears
+    # the project down afterwards.
+    task = tmp_path / "compose-task"
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "solution").mkdir()
+    (task / "task.toml").write_text(
+        'schema_version = "1.4"\n[task]\nname = "t/compose"\n'
+        '[verifier]\nenvironment_mode = "separate"\n'
+        '[environment]\nnetwork_mode = "no-network"\n',
+        encoding="utf-8")
+    (task / "instruction.md").write_text("# Write the greeting\n\nCreate /app/hello.txt containing exactly `hello envcert`.\n", encoding="utf-8")
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    working_dir: /app\n",
+        encoding="utf-8")
+    (task / "solution" / "solve.sh").write_text("#!/bin/bash\nmkdir -p /app\nprintf 'hello envcert\\n' > /app/hello.txt\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text(
+        "#!/bin/bash\nmkdir -p /logs/verifier\n"
+        "if grep -qx 'hello envcert' /app/hello.txt; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi\n",
+        encoding="utf-8")
+    settings = load_settings(None, None, {"execution": "docker"})
+    report = run_checks(task, settings)
+    statuses = _statuses(report)
+    assert statuses["EC060"] == "PASS"
+    assert statuses["EC061"] == "PASS"
+    assert statuses["EC066"] == "PASS"
+
+
 def test_docker_cheat_battery_proves_forgeable_verifier(tmp_path):
     task = tmp_path / "forge-task"
     shutil.copytree(EXAMPLES / "safe-environment", task)

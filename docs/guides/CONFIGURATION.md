@@ -14,6 +14,10 @@ disabled = ["EC031"]             # skip specific stable check IDs
 enabled = false                  # true requires an explicit [execution] mode (never implied)
 repetitions = 3
 
+[checks.nemo]
+# endpoint = "https://gym.internal/verify"   # NeMo Gym Resources Server (EC065)
+# headers = { Authorization = "Bearer ..." }  # never echoed into reports
+
 [execution]
 # mode = "local-python"          # trusted tasks only, NO sandbox
 # mode = "docker"                # restricted container
@@ -44,3 +48,9 @@ exit code 2 and a specific message — EnvCert never silently ignores bad config
 
 Dynamic execution can also be set with `[execution] mode = "docker"`, but the
 CLI flag is recommended so CI intent is explicit.
+
+`[checks.nemo] endpoint` is independent of `[execution]`: an explicit HTTP
+Resources-Server URL is itself the opt-in, so EC065 can probe a remote
+grader without enabling any local execution mode. Invalid URLs (anything
+other than `http://`/`https://`) and non-string header values are rejected
+with exit code 2.

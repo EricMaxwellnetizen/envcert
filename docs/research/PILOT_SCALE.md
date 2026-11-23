@@ -1,9 +1,46 @@
-# Scale pilot: humungous real-world campaign (0.4.3)
+# Scale pilot: humungous real-world campaign (0.4.3, re-run at 0.4.5)
 
 Date: 2026-11-23. Static analysis only for external corpora (plus the
 Docker/live execution in PILOT_040). As before: a finding on a public
 task is a methodology observation, not an accusation — every
 policy-driving class below was hand-reviewed in source.
+
+## 0.4.5 re-run (same corpora, same host, same static profile)
+
+The 0.4.5 release adds cross-module call-graph summaries (EC054), an
+opt-in HTTP verifier probe, semantic near-duplicate detection (EC081)
+and JS/TS mutation.  The full campaign was re-run to prove the new
+analysis does not change verdicts on 723 real task bundles.
+
+| Corpus | Size | 0.4.3 pass | 0.4.5 pass | Time (0.4.5) | Drivers (unchanged classes) |
+|---|---:|---:|---:|---:|---|
+| Harbor Hub: algotune | 154 tasks | 154 | 154 | 54s | clean |
+| Harbor Hub: gaia | 165 | 165 | 165 | 43s | clean |
+| Harbor Hub: cad-bench | 100 | 100 | 100 | 67s | clean (AST cache below) |
+| Harbor Hub: harbor-index | 80 | 67 | 67 | 91s | EC054 9, EC032 2, EC021 1, EC056 1 |
+| Harbor Hub: frontier-memory | 15 | 11 | 11 | 21s | EC054 3, EC012 1 |
+| Terminal-Bench (rendered) | 51 | 47 | 47 | 126s | EC054 2, EC053 1, EC032 1 |
+| Harbor repo templates | 158 | 106 | 107 | 50s | EC030 15, EC001 14, EC051 10, EC053 10, EC050 9, EC054 6 |
+| SWE-bench full test split | 2,294 rows | — | — | ~5s | EC081 19 exact duplicate groups |
+| inspect_evals (UK AISI) | 131 pkgs | 87 | 87 | 6s | EC053/EC056 review items |
+
+No verdict flipped except one Harbor template that now passes (the
+cross-module EC054 summaries recognise its validated reward path).  The
+harbor-index EC054 drivers are the same nine gated designs documented
+below — the cross-file summary engine does not clear them because they
+genuinely read a harness score file back.
+
+### Performance rectification forced by this re-run
+
+The cross-module summary engine initially made static analysis ~2x
+slower (cad-bench 51s → 113s): the AST was re-walked for every
+assignment and every fixed-point iteration (1.35M `ast.walk` calls per
+12 tasks).  Descendant lists are now cached per node for the duration of
+one analysis (cad-bench 113s → 67s; profiled 12-task slice 33.9s →
+14.5s).  The semantic near-duplicate pass had the same problem: it
+re-normalised every candidate pair's prompts (45MB of text), so the full
+SWE-bench audit went 3s → 19s; normalising once per row brought it back
+to ~5s (semantic pass alone: 9.0s → 0.9s).
 
 ## Corpora (723 task bundles + 2 datasets + 131 eval packages)
 
@@ -48,6 +85,21 @@ policy-driving class below was hand-reviewed in source.
   `django__django-11555` vs `-11559`) — hand-verified against
   instance ids. EC085: all 2,294 grading specs consistent. EC080: no
   verbatim answer leakage.
+- **Semantic near-duplicates (0.4.5), real prompts**: SWE-bench's
+  duplicates are textual, so the token-set cosine adds 0 findings there
+  (correctly: its 19 duplicate groups are exact).  To measure the
+  detector on realistic long prompts, 40 real SWE-bench problem
+  statements were deterministically paraphrased (sentence reordering +
+  synonym substitution + case noise) and placed next to 40 untouched
+  distractor rows: EC081 reported **44 near-duplicate pairs, all with
+  conflicting labels, and 0 false positives** on the distractors.
+- **TF-weighted similarity was rejected as a metric**: an earlier
+  sublinear-TF variant flagged 4 "semantic" pairs in SWE-bench — all
+  four were false positives (pairs of unrelated issues sharing a pull
+  request template, e.g. `scikit-learn-11206` vs `scikit-learn-14125`).
+  The binary token-set cosine over discriminative tokens does not make
+  that mistake; the false positives are recorded here rather than
+  hidden.
 - **harbor-index remaining drivers**: 9 EC054 review items (harness
   score files read back by test.sh — gated designs, WARN is the right
   output), 2 unversioned installers, 1 vendored `pytest.ini`, 1 real
@@ -60,3 +112,23 @@ wall-clock on the maintainer's Windows host, static profile, and will
 differ elsewhere; the honest claim is the before/after on the same
 host. inspect_evals numbers aggregate per-eval-directory runs with the
 Inspect adapter (static-only, per its recorded limitations).
+
+The 0.4.5 re-run was executed on the same host but partly overlapped
+other jobs, so its absolute times are upper bounds; the before/after
+claims in the performance section were measured back-to-back on an
+otherwise idle host.
+
+Timing on this host is noisy: the same 131-package inspect_evals sweep
+measured 6.1s, 6.6s and 6.8s in three back-to-back runs (0.4.4 tree
+6.8s vs 0.4.5 tree 6.1s — no regression), but a run that started right
+after a 100-task rollup measured 155s, and one run against the 0.4.4
+tree was killed after 40 minutes.  The corpus and the verdicts were
+identical in every case; only wall-clock differed.  Verdict counts, not
+wall-clock, are the comparable number; where a time is quoted it is the
+median of repeated idle-host runs.
+
+The semantic near-duplicate metric is lexical (token-set cosine over
+discriminative content tokens), not embedding-level: it catches
+reordered or lightly reworded prompts, not arbitrary paraphrase. It is
+a review aid — pairs are reported with their similarity and whether
+their labels conflict, and the severity depends on that conflict.

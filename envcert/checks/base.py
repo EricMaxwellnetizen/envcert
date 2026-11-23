@@ -28,6 +28,8 @@ class CheckContext:
     max_mutants: int = 10
     external_tools: bool = False
     runner_command: str = ""
+    nemo_endpoint: str | None = None
+    nemo_headers: dict = field(default_factory=dict)
     shared: dict = field(default_factory=dict)  # checks stash run artefacts (e.g. image digest) for the report
 
 

@@ -70,7 +70,7 @@ envcert explain EC066
 Real output (safe example, abridged):
 
 ```text
-EnvCert 0.4.0  report schema 1.0.0
+EnvCert 0.4.5  report schema 1.0.0
 Task: envcert/hello-file  adapter=harbor  files=8
 Profile: harbor  execution: none  fail_on: CRITICAL, HIGH
 
@@ -106,11 +106,11 @@ The intentionally vulnerable example produces (among others):
 | Docker | EC030–EC033 | unpinned base images, root user, remote ADD / curl\|sh, undeclared network policy |
 | Dependencies | EC040–EC041 | unpinned pip deps, unverified downloads |
 | Verifier quality | EC050–EC056 | missing/empty verifier, no reward production, unconditional success, assertion-free tests, self-reported rewards (AST data-flow), eval/unsafe-deserialisation in the verifier |
-| Dataset integrity | EC080–EC085 | answer embedded in the prompt, duplicate/near-duplicate rows, train/test overlap, degenerate labels, broken rows, inconsistent grading specs |
+| Dataset integrity | EC080–EC085 | answer embedded in the prompt, exact/near/semantic duplicate rows, train/test overlap, degenerate labels, broken rows, inconsistent grading specs |
 | Multi-step | EC004 | per-step instruction/verifier completeness (plus per-step EC002) |
-| Dynamic (opt-in) | EC060–EC062 | gold run, no-op negative control (docker/local/external), repeatability |
+| Dynamic (opt-in) | EC060–EC062, EC065 | gold run, no-op negative control, repeatability, NeMo verify()/HTTP Resources-Server probing |
 | Cheat battery (opt-in) | EC066 | deterministic cheat agents — stub solution, conftest outcome-faking, forged reward file, verifier tampering — must all be rejected |
-| Mutation (opt-in) | EC063–EC064 | AST mutants of a Python solution; literal mutants of shell solutions under Docker |
+| Mutation (opt-in) | EC063–EC064 | AST mutants of Python solutions, lexer mutants of JS/TS solutions, literal mutants of shell solutions under Docker |
 | External companions (opt-in) | EC070–EC072 | Hadolint, Trivy, Semgrep — run only when installed and `--external-tools` is passed |
 
 Every finding carries evidence, a severity, a confidence, a remediation and
@@ -130,8 +130,11 @@ potential exposure as a confirmed vulnerability.
 ## Dynamic, cheat-battery & mutation checks (opt-in)
 
 ```bash
-envcert check ./my-harbor-task --execution docker                 # restricted container run
+envcert check ./my-harbor-task --execution docker                 # Dockerfile, compose or prebuilt image
 envcert check ./examples/python-task --execution local-python --mutation
+envcert check ./js-task --execution local-python --mutation       # JS/TS mutants too
+envcert check ./nemo-dataset --execution local-python              # local verify() probing
+envcert check ./nemo-dataset --nemo-endpoint https://gym.example/verify  # HTTP Resources Server
 # EC060 PASS gold, EC061 PASS no-op rejected, EC062 PASS repeatable, EC063 mutation rejection rate
 # EC066: deterministic cheat agents (stub solution, conftest outcome-faking,
 #        forged reward file, verifier tampering) are played against your
@@ -177,7 +180,7 @@ extension are specified in `docs/architecture/REPORT_SCHEMA.md`.
 ## GitHub Actions
 
 ```yaml
-- uses: EricMaxwellnetizen/envcert@v0.4.0   # or @v0 for the latest 0.x
+- uses: EricMaxwellnetizen/envcert@v0.4.5   # or @v0 for the latest 0.x
   with:
     path: ./my-task
     fail-on: critical,high
@@ -195,11 +198,11 @@ input/config · `3` internal/execution error.
 
 | Format | Status |
 |---|---|
-| Harbor task directories (task.toml schema 1.x, incl. multi-step `steps/`) | Implemented and fixture-tested |
+| Harbor task directories (task.toml schema 1.x, incl. multi-step `steps/`, Dockerfile / docker-compose / prebuilt `docker_image`) | Implemented and fixture-tested |
 | Generic Docker task bundles (Dockerfile + tests/solution) | Implemented, reduced-confidence heuristics |
-| NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static + EC065 probing; Resources-Server HTTP probing not yet) — `examples/nemo-gym-dataset` |
+| NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static + local verify() probing + HTTP Resources-Server probing) — `examples/nemo-gym-dataset` |
 | Inspect AI evaluations (@task Python files) | Implemented (static) — `examples/inspect-eval` |
-| Dataset files (`.jsonl` / `.json` / `.csv`, SWE-bench/NeMo/OpenAI-style fields) | Implemented (EC080–EC084) — `envcert check data.jsonl` |
+| Dataset files (`.jsonl` / `.json` / `.csv`, SWE-bench/NeMo/OpenAI-style fields) | Implemented (EC080–EC085) — `envcert check data.jsonl` |
 
 Dynamic execution modes: `docker` (restricted), `local-python` (trusted
 pytest tasks, no sandbox), `external` (your disposable-VM/remote runner via
@@ -211,6 +214,13 @@ a documented JSON protocol). OCI image digests can be bound with
 
 `envcert init` writes `envcert.toml` (profiles: harbor/strict/minimal/ci,
 per-check enable/disable, `fail_on` policy). See `docs/guides/CONFIGURATION.md`.
+
+## Adopting it
+
+`docs/research/INDUSTRY_READINESS.md` is the operator's entry point: the
+deployment envelope, what was proven on 723 real task bundles and the full
+2,294-row SWE-bench split, the guarantees and the honest limits, an
+adoption checklist and the release-integrity checklist.
 
 ## Contributing
 

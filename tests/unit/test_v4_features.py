@@ -1,6 +1,7 @@
 """EnvCert 0.4.0: AST verifier analysis, cheat battery, dataset adapter,
 deterministic fix/scaffold, markdown/HTML formats."""
 import json
+import shutil
 
 from envcert.cli.main import main
 from envcert.core.config import load_settings
@@ -331,6 +332,213 @@ def test_ec054_chain_without_any_comparison_still_flagged(task_factory):
     assert statuses(report, "EC054") in (["WARN"], ["FAIL"])
 
 
+def test_ec054_cross_file_validation_through_import(task_factory):
+    # helpers.py owns the comparison; verifier.py imports it.  Validation
+    # must propagate across module boundaries (issue #1).
+    files = dict(BASIC)
+    files["tests/helpers.py"] = (
+        "def compare_deep(state, want):\n"
+        "    return 1.0 if state.get('value') == want else 0.0\n"
+    )
+    files["tests/verifier.py"] = (
+        "import json\n"
+        "from helpers import compare_deep\n"
+        "def load_and_grade(path, want):\n"
+        "    state = json.loads(open(path).read())\n"
+        "    return compare_deep(state, want)\n"
+        "def main():\n"
+        "    reward = load_and_grade('/app/state.json', 42)\n"
+        "    return reward\n"
+    )
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    assert statuses(report, "EC054") == ["PASS"]
+
+
+def test_ec054_cross_file_unvalidated_chain_still_flagged(task_factory):
+    files = dict(BASIC)
+    files["tests/helpers.py"] = (
+        "def passthrough(state):\n"
+        "    return state['score']\n"
+    )
+    files["tests/verifier.py"] = (
+        "import json\n"
+        "from helpers import passthrough\n"
+        "def main():\n"
+        "    state = json.loads(open('/app/state.json').read())\n"
+        "    reward = passthrough(state)\n"
+        "    return reward\n"
+    )
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    assert statuses(report, "EC054") in (["WARN"], ["FAIL"])
+
+
+def test_ec054_cross_file_source_helper_is_agent_controlled(task_factory):
+    # The read happens in another module; the caller parses its return
+    # value straight into the reward.
+    files = dict(BASIC)
+    files["tests/io_helpers.py"] = (
+        "def read_state():\n"
+        "    return open('/app/state.json').read()\n"
+    )
+    files["tests/verifier.py"] = (
+        "from io_helpers import read_state\n"
+        "def verify(response=None, task_data=None):\n"
+        "    return float(read_state())\n"
+    )
+    report = run_checks(task_factory(files), load_settings(None, None, None))
+    assert statuses(report, "EC054") == ["FAIL"]
+
+
+def test_ec065_http_resources_server_probe(tmp_path):
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - stdlib handler API
+            length = int(self.headers.get("Content-Length", "0"))
+            body = _json.loads(self.rfile.read(length) or b"{}")
+            reward = 1.0 if body.get("response") == "42" else 0.0
+            payload = _json.dumps({"reward": reward}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):  # silence test output
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_port}/verify?token=secret"
+        task = tmp_path / "nemo-http"
+        task.mkdir()
+        (task / "dataset.toml").write_text("[dataset]\nname = \"nemo-http\"\n", encoding="utf-8")
+        (task / "rows.jsonl").write_text(
+            _json.dumps({"question": "What is 6*7?", "expected_answer": "42"}) + "\n",
+            encoding="utf-8")
+        settings = load_settings(None, None, {"nemo_endpoint": endpoint, "enable": ["EC065"]})
+        report = run_checks(task, settings)
+        assert statuses(report, "EC065") == ["PASS"]
+        evidence = by_id(report)["EC065"][0]["evidence"]
+        assert evidence["runner"] == "http resources server"
+        assert "token" not in evidence["endpoint"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_ec065_http_error_on_mutant_counts_as_rejection(tmp_path):
+    """A grader that refuses to score a wrong answer awarded no reward: rejection."""
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - stdlib handler API
+            length = int(self.headers.get("Content-Length", "0"))
+            body = _json.loads(self.rfile.read(length) or b"{}")
+            if body.get("response") != "42":
+                self.send_response(422)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            payload = _json.dumps({"reward": 1.0}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):  # silence test output
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_port}/verify"
+        task = tmp_path / "nemo-http-err"
+        task.mkdir()
+        (task / "dataset.toml").write_text("[dataset]\nname = \"nemo-http-err\"\n", encoding="utf-8")
+        (task / "rows.jsonl").write_text(
+            _json.dumps({"question": "q", "expected_answer": "42"}) + "\n", encoding="utf-8")
+        settings = load_settings(None, None, {"nemo_endpoint": endpoint, "enable": ["EC065"]})
+        report = run_checks(task, settings)
+        assert statuses(report, "EC065") == ["PASS"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_ec065_local_verifier_raising_on_mutant_counts_as_rejection(task_factory):
+    """A verifier that raises on a wrong answer awarded no reward: rejection."""
+    task = task_factory({
+        "verifier.py": (
+            "def verify(response=None, task_data=None):\n"
+            "    if response != '42':\n"
+            "        raise ValueError('cannot score this response')\n"
+            "    return 1.0\n"
+        ),
+        "rows.jsonl": '{"question": "q", "expected_answer": "42"}\n',
+    })
+    settings = load_settings(None, None, {"execution": "local-python", "enable": ["EC065"]})
+    report = run_checks(task, settings, adapter_name="nemo-gym")
+    assert statuses(report, "EC065") == ["PASS"]
+
+
+def test_config_rejects_bad_nemo_endpoint(tmp_path):
+    import pytest
+
+    from envcert.core.errors import ConfigError
+
+    cfg = tmp_path / "envcert.toml"
+    cfg.write_text("[checks.nemo]\nendpoint = \"ftp://example.com/verify\"\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_settings(cfg, None, None)
+
+
+def test_js_mutation_sites_skip_comments_strings_and_regex():
+    from envcert.checks.mutation_js import mutation_sites
+
+    src = ("// a + b\n/* c - d */\nconst s = 'a + b';\n"
+           "const r = /a+b/g;\nconst x = 1 + 2;\n")
+    descriptions = [site.description for site in mutation_sites(src)]
+    assert len([d for d in descriptions if d.startswith("operator +")]) == 1
+    assert any(d.startswith("string") for d in descriptions)
+    assert any(d.startswith("number 1 -> 2") for d in descriptions)
+
+
+def test_ec063_js_mutation_rejects_wrong_solutions(task_factory):
+    if shutil.which("node") is None:
+        import pytest
+
+        pytest.skip("node not available")
+    files = dict(BASIC)
+    files["solution/add.js"] = (
+        "function add(a, b) {\n"
+        "  return a + b + 1 - 1;\n"
+        "}\n"
+        "module.exports = { add };\n"
+    )
+    files["tests/add.test.js"] = (
+        "const assert = require('assert');\n"
+        "const { add } = require('../solution/add.js');\n"
+        "assert.strictEqual(add(2, 3), 5);\n"
+    )
+    settings = load_settings(None, None, {
+        "execution": "local-python", "mutation": True, "enable": ["EC063"]})
+    report = run_checks(task_factory(files), settings)
+    assert statuses(report, "EC063") == ["PASS"]
+    ev = by_id(report)["EC063"][0]["evidence"]
+    assert ev["language"] == "js"
+    assert ev["rejected"] >= 1
+    assert ev["rejection_rate"] == 1.0
+
+
 def test_ec056_flags_eval_and_pickle_in_verifier(task_factory):
     task = _task_with_verifier(task_factory, (
         "import pickle\n"
@@ -407,6 +615,59 @@ def test_dataset_duplicates_and_degenerate_labels(tmp_path):
     assert report["environment"]["adapter"] == "dataset"
     assert statuses(report, "EC081") == ["WARN"]
     assert statuses(report, "EC083") == ["WARN"]
+
+
+def test_dataset_semantic_near_duplicate_detected(tmp_path):
+    # Reordered/lightly reworded prompts: 5-gram Jaccard misses these, the
+    # deterministic TF-IDF cosine catches them (issue #2).
+    data = _write_jsonl(tmp_path / "eval.jsonl", [
+        {"id": "1", "prompt": "Calculate the total of the given numbers and return the sum.", "answer": "42"},
+        {"id": "2", "prompt": "Return the sum by calculating the total of the numbers given.", "answer": "43"},
+        {"id": "3", "prompt": "Name the capital city of France.", "answer": "Paris"},
+    ])
+    report = run_checks(data, load_settings(None, None, None), adapter_name="dataset")
+    assert statuses(report, "EC081") == ["WARN"]
+    ev = by_id(report)["EC081"][0]["evidence"]
+    assert ev["semantic_duplicate_pairs_sampled"] >= 1
+    assert ev["semantic_conflicting_label_pairs"] >= 1
+    assert ev["semantic_examples"][0]["similarity"] >= 0.82
+
+
+def test_dataset_distinct_prompts_have_no_semantic_duplicates(tmp_path):
+    data = _write_jsonl(tmp_path / "eval.jsonl", [
+        {"id": "1", "prompt": "Summarise the causes of the French Revolution.", "answer": "a"},
+        {"id": "2", "prompt": "Compute the derivative of x squared plus three x.", "answer": "b"},
+        {"id": "3", "prompt": "Translate this sentence into German.", "answer": "c"},
+    ])
+    report = run_checks(data, load_settings(None, None, None), adapter_name="dataset")
+    ev = by_id(report)["EC081"][0]["evidence"]
+    assert ev["semantic_duplicate_pairs_sampled"] == 0
+
+
+def test_dataset_semantic_detects_paraphrase_of_long_prompt(tmp_path):
+    """Realistic case: a long prompt, lightly reworded and reordered."""
+    sentences = [
+        "The parser raises an unexpected error when the configuration file is empty.",
+        "It happens during the first validation pass of the loader.",
+        "The traceback points at the default value branch of the settings class.",
+        "This regression appeared after the options were moved to a new module.",
+        "A workaround is to pass an explicit fallback list on the command line.",
+    ]
+    original = "\n\n".join(sentences)
+    paraphrased = "\n\n".join([sentences[1], sentences[0].replace("raises an unexpected error",
+                                                                 "fails with an unexpected failure"),
+                                sentences[2], sentences[3], sentences[4]])
+    data = _write_jsonl(tmp_path / "eval.jsonl", [
+        {"id": "1", "prompt": original, "answer": "patch-a"},
+        {"id": "2", "prompt": paraphrased, "answer": "patch-b"},
+        {"id": "3", "prompt": "Summarise the causes of the French Revolution.", "answer": "c"},
+        {"id": "4", "prompt": "Compute the derivative of x squared plus three x.", "answer": "d"},
+    ])
+    report = run_checks(data, load_settings(None, None, None), adapter_name="dataset")
+    assert statuses(report, "EC081") == ["WARN"]
+    ev = by_id(report)["EC081"][0]["evidence"]
+    assert ev["semantic_duplicate_pairs_sampled"] >= 1
+    assert ev["semantic_conflicting_label_pairs"] >= 1
 
 
 def test_dataset_split_overlap(tmp_path):

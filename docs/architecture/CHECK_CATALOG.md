@@ -216,9 +216,9 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 ## EC063 - Mutation testing: verifier rejects mutated (incorrect) solutions
 
 - Category: mutation  |  Default severity on failure: MEDIUM  |  Dynamic: True
-- Description: Mutated variants of a correct Python solution should be rejected; the rejection rate is a verifier-strength signal.
+- Description: Mutated variants of a correct solution should be rejected; the rejection rate is a verifier-strength signal.
 - Remediation: Add assertions covering the mutated behaviour; do not treat the rate as proof of correctness.
-- Limitations: Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest tasks only.
+- Limitations: Equivalent/invalid mutants and the small mutant set limit this signal. Python/pytest and JS/TS (node) tasks under --execution local-python.
 
 ## EC064 - Shell-solution mutation: verifier rejects mutated reference solutions (docker)
 
@@ -230,9 +230,9 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 ## EC065 - NeMo verifier probing with mutated inputs (gold/wrong/swapped answers)
 
 - Category: dynamic  |  Default severity on failure: HIGH  |  Dynamic: True
-- Description: Feeding a NeMo Gym verify() its rows' expected answers should score 1; mutated and row-swapped answers should score < 1.
-- Remediation: Fix verify() so correct answers pass and incorrect/swapped answers fail for every probed row.
-- Limitations: local-python execution only (trusted code, no sandbox); probes up to 10 rows and the verify(response=..., task_data=...) convention.
+- Description: Feeding a NeMo Gym verifier its rows' expected answers should score 1; mutated and row-swapped answers should score < 1.
+- Remediation: Fix the verifier so correct answers pass and incorrect/swapped answers fail for every probed row.
+- Limitations: Probes up to 10 rows. Local mode imports verify() in a subprocess (trusted code, no sandbox); HTTP mode POSTs to an operator-supplied Resources-Server endpoint (--nemo-endpoint) and reads reward/score.
 
 ## EC066 - Deterministic cheat-agent battery is rejected by the verifier
 
@@ -268,7 +268,7 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Category: dataset  |  Default severity on failure: MEDIUM  |  Dynamic: False
 - Description: Exact duplicates, reused ids and near-identical prompts (especially with conflicting labels) inflate scores, leak across splits and corrupt training signal.
 - Remediation: Deduplicate prompts, make ids unique, and resolve label conflicts by re-adjudicating the row.
-- Limitations: Near-duplicates use word 5-gram Jaccard >= 0.9 over a bounded prompt sample; semantic duplicates need embedding review.
+- Limitations: Near-duplicates use word 5-gram Jaccard >= 0.9 and deterministic token-set cosine >= 0.82 over a bounded prompt sample; embedding-level paraphrases still need review.
 
 ## EC082 - Dataset splits do not share prompts (no train/test overlap)
 

@@ -51,7 +51,10 @@ def call(row, response):
             out = out.get("reward", 0.0)
         return float(out), ""
     except Exception as exc:
-        return None, f"{type(exc).__name__}: {exc}"
+        # The verifier refused/failed to score this response: no reward was
+        # awarded, which is a rejection for the mutant probe (and a broken
+        # verifier for the gold probe).  The message is kept as evidence.
+        return 0.0, f"{type(exc).__name__}: {exc}"
 
 results = []
 for i, row in enumerate(rows):
@@ -65,11 +68,24 @@ for i, row in enumerate(rows):
     if len(rows) > 1:
         nxt = rows[(i + 1) % len(rows)]
         swap_val = str(nxt.get("expected_answer", nxt.get("answer", nxt.get("target", ""))))
-    swap, e3 = call(row, swap_val) if swap_val and swap_val != expected else (None, "")
+    swap_na = not (swap_val and swap_val != expected)
+    swap, e3 = call(row, swap_val) if not swap_na else (None, "")
     results.append({"row": i, "gold": gold, "mutant": mutant, "swap": swap,
-                    "errors": [e for e in (e1, e2, e3) if e]})
+                    "swap_na": swap_na, "errors": [e for e in (e1, e2, e3) if e]})
 print(json.dumps({"results": results}))
 '''
+
+
+def _summarize(results: list[dict], start: float, exit_code: int | None = None,
+               stderr: str = "") -> RunResult:
+    scored = [r for r in results if r.get("gold") is not None]
+    gold_ok = sum(1 for r in scored if r["gold"] >= 1.0)
+    mutant_rejected = sum(1 for r in scored if r.get("mutant") is not None and r["mutant"] < 1.0)
+    reward = 1.0 if scored and gold_ok == len(scored) and mutant_rejected == len(scored) else 0.0
+    return RunResult(ok=reward == 1.0, exit_code=exit_code,
+                     stdout=json.dumps({"results": results})[:20000], reward=reward,
+                     duration_sec=round(time.time() - start, 3), stderr=stderr,
+                     error="" if scored else "no rows with expected answers could be scored")
 
 
 def probe_verifier(task_root: Path, verifier_rel: str, dataset_rel: str, timeout: int = 120) -> RunResult:
@@ -104,11 +120,92 @@ def probe_verifier(task_root: Path, verifier_rel: str, dataset_rel: str, timeout
             return RunResult(ok=False, error="probe output was not JSON", stdout=out[-2000:], duration_sec=dur)
         if payload.get("error"):
             return RunResult(ok=False, error=str(payload["error"]), duration_sec=dur)
-        results = payload.get("results", [])
-        scored = [r for r in results if r.get("gold") is not None]
-        gold_ok = sum(1 for r in scored if r["gold"] >= 1.0)
-        mutant_rejected = sum(1 for r in scored if r.get("mutant") is not None and r["mutant"] < 1.0)
-        reward = 1.0 if scored and gold_ok == len(scored) and mutant_rejected == len(scored) else 0.0
-        return RunResult(ok=reward == 1.0, exit_code=proc.returncode, stdout=json.dumps(payload)[:20000],
-                         reward=reward, duration_sec=dur,
-                         error="" if scored else "no rows with expected answers could be scored")
+        return _summarize(payload.get("results", []), start, exit_code=proc.returncode,
+                          stderr=(proc.stderr or "")[-2000:])
+
+
+def probe_http_verifier(endpoint: str, task_root: Path, dataset_rel: str, timeout: int = 120,
+                        headers: dict[str, str] | None = None) -> RunResult:
+    """Opt-in probing of a NeMo Gym Resources-Server HTTP verify endpoint.
+
+    Posts ``{"response": ..., "task_data": row}`` (Gym's convention) and
+    reads ``{"reward": ...}`` or ``{"score": ...}``.  Network access is
+    explicit: the operator supplied the endpoint.  Requests are bounded in
+    count, response size and wall-clock budget; the endpoint and headers
+    are never echoed into evidence (headers may carry credentials).
+    """
+    from urllib import request as urlrequest
+
+    start = time.time()
+    task_root = Path(task_root)
+    rows_src = task_root / dataset_rel
+    rows: list[dict] = []
+    try:
+        with rows_src.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(parsed, dict):
+                    rows.append(parsed)
+                if len(rows) >= 10:
+                    break
+    except OSError as exc:
+        return RunResult(ok=False, error=f"dataset rows unreadable: {exc}")
+    request_headers = {"Content-Type": "application/json", "User-Agent": "envcert-nemo-probe",
+                       **(headers or {})}
+
+    def call(row: dict, response: str | None) -> tuple[float | None, str]:
+        """Return (reward, error).
+
+        A rejected wrong answer may come back as a score < 1 or as an HTTP
+        error (the grader refused to score it): both mean "no reward for
+        the wrong answer", so an HTTP error counts as reward 0.0.  Network
+        failures and timeouts are inconclusive (None) and are never
+        counted as rejections.
+        """
+        if response is None:
+            return None, ""
+        if time.time() - start > timeout:
+            return None, "probe wall-clock budget exhausted"
+        body = json.dumps({"response": response, "task_data": row}).encode("utf-8")
+        req = urlrequest.Request(endpoint, data=body, headers=request_headers, method="POST")
+        try:
+            with urlrequest.urlopen(req, timeout=min(30, max(1, timeout))) as resp:  # noqa: S310 - operator-supplied endpoint
+                payload = resp.read(1_000_000).decode("utf-8", errors="replace")
+            data = json.loads(payload)
+            if isinstance(data, dict):
+                value = data.get("reward", data.get("score"))
+            else:
+                value = data
+            if value is None:
+                return None, "response carries no reward/score field"
+            return float(value), ""
+        except urlrequest.HTTPError as exc:
+            # The grader answered, but with an error status: it awarded no
+            # reward for this response.
+            return 0.0, f"HTTP {exc.code}"
+        except Exception as exc:  # noqa: BLE001 - probe failures are evidence, not crashes
+            return None, f"{type(exc).__name__}: {exc}"
+
+    results: list[dict] = []
+    for i, row in enumerate(rows):
+        expected = row.get("expected_answer", row.get("answer", row.get("target")))
+        if expected is None:
+            results.append({"row": i, "skipped": "no expected answer field"})
+            continue
+        expected = str(expected)
+        gold, e1 = call(row, expected)
+        mutant, e2 = call(row, expected + "-WRONG")
+        swap_val = None
+        if len(rows) > 1:
+            nxt = rows[(i + 1) % len(rows)]
+            swap_val = str(nxt.get("expected_answer", nxt.get("answer", nxt.get("target", ""))))
+        swap_na = not (swap_val and swap_val != expected)
+        swap, e3 = call(row, swap_val if not swap_na else None)
+        results.append({"row": i, "gold": gold, "mutant": mutant, "swap": swap,
+                        "swap_na": swap_na, "errors": [e for e in (e1, e2, e3) if e]})
+    return _summarize(results, start)

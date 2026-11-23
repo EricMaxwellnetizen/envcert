@@ -4,6 +4,16 @@ All notable changes are documented here (Keep a Changelog format).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-23
+
+### Added
+- **Prebuilt-image Docker execution**: Harbor tasks declaring
+  `[environment] docker_image` (no Dockerfile) now run EC060/EC061/
+  EC062/EC066 against the pulled image (roadmap #4, compose remains).
+- **Transitive call-graph validation (EC054)**: helper chains that
+  delegate to comparing helpers validate (A → B → compare), completing
+  the inter-procedural step started in 0.4.1/0.4.2 (roadmap #1 core).
+
 ## [0.4.3] - 2026-11-23
 
 ### Fixed (scale campaign: 723 tasks, 2,294-row dataset, 131 evals)

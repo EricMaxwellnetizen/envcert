@@ -297,6 +297,40 @@ def test_ec032_versioned_installer_is_medium(task_factory):
     assert hit["severity"] == "HIGH"
 
 
+def test_ec054_transitive_validation_through_helper_chain(task_factory):
+    # main -> load_and_grade (no comparison) -> compare_deep (compares):
+    # validation is transitive through the call graph.
+    task = _task_with_verifier(task_factory, (
+        "import json\n"
+        "def compare_deep(state, want):\n"
+        "    return 1.0 if state.get('value') == want else 0.0\n"
+        "def load_and_grade(path, want):\n"
+        "    state = json.loads(open(path).read())\n"
+        "    return compare_deep(state, want)\n"
+        "def main():\n"
+        "    reward = load_and_grade('/app/state.json', 42)\n"
+        "    return reward\n"
+    ))
+    report = run_checks(task, load_settings(None, None, None))
+    assert statuses(report, "EC054") == ["PASS"]
+
+
+def test_ec054_chain_without_any_comparison_still_flagged(task_factory):
+    task = _task_with_verifier(task_factory, (
+        "import json\n"
+        "def passthrough(state):\n"
+        "    return state['score']\n"
+        "def load_and_grade(path):\n"
+        "    state = json.loads(open(path).read())\n"
+        "    return passthrough(state)\n"
+        "def main():\n"
+        "    reward = load_and_grade('/app/state.json')\n"
+        "    return reward\n"
+    ))
+    report = run_checks(task, load_settings(None, None, None))
+    assert statuses(report, "EC054") in (["WARN"], ["FAIL"])
+
+
 def test_ec056_flags_eval_and_pickle_in_verifier(task_factory):
     task = _task_with_verifier(task_factory, (
         "import pickle\n"

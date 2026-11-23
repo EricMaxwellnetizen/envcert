@@ -48,7 +48,11 @@ def _is_python_task(ctx) -> bool:
 def _run_variant(c: CheckContext, variant: str):
     ctx = c.task
     if c.execution == "docker":
-        result = DockerRunner().run_harbor_task(ctx.root, variant=variant)
+        env_cfg = ctx.config.get("environment") or {}
+        declared_image = env_cfg.get("docker_image") if isinstance(env_cfg, dict) else None
+        result = DockerRunner().run_harbor_task(
+            ctx.root, variant=variant,
+            image=str(declared_image) if declared_image and not ctx.dockerfile_path else None)
         if result.image_digest:
             c.shared["image_digest"] = result.image_digest
         if result.image_digest_note:

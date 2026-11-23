@@ -103,6 +103,29 @@ def test_parquet_without_pyarrow_is_reported(tmp_path):
         assert statuses["EC084"] == "WARN"
 
 
+def test_docker_runner_prebuilt_image_skips_build(monkeypatch, tmp_path):
+    (tmp_path / "tests").mkdir()
+    calls = []
+
+    def fake_run(cmd, timeout):
+        calls.append(cmd)
+        if "version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="linux 29.0.0\n", stderr="")
+        if "inspect" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="sha256:" + "d" * 64 + "\n", stderr="")
+        if "run" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="done\n1\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(docker_runner, "_run", fake_run)
+    monkeypatch.setattr(docker_runner.shutil, "which", lambda _: "docker")
+    result = docker_runner.DockerRunner().run_harbor_task(tmp_path, variant="gold", image="example/prebuilt:1")
+    assert result.reward == 1.0
+    verbs = [c[1] for c in calls if len(c) > 1]
+    assert "pull" in verbs and "build" not in verbs and "rmi" not in verbs
+    assert "prebuilt" in (result.image_digest_note or "")
+
+
 def test_docker_runner_rejects_windows_containers_engine(monkeypatch):
     def fake_run(cmd, timeout):
         return subprocess.CompletedProcess(cmd, 0, stdout="windows 29.0.0\n", stderr="")

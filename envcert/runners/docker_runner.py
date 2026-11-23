@@ -76,12 +76,15 @@ class DockerRunner(Runner):
         return "echo 'envcert: no-op variant (solution skipped)'; "
 
     def run_harbor_task(self, task_root, timeout: int = 600, network: str = "none",
-                        variant: str = "gold") -> RunResult:
+                        variant: str = "gold", image: str | None = None) -> RunResult:
         """Build environment/, run solution (gold only) then tests/test.sh, read reward.
 
         variant="noop" skips the reference solution entirely — the negative
         control: whatever the untouched environment scores is what a
-        do-nothing agent would get.
+        do-nothing agent would get.  With ``image`` (a task-declared
+        prebuilt image), no Dockerfile is built: the image is pulled and
+        used as-is, which is how Harbor tasks that declare
+        ``[environment] docker_image`` run.
         """
         from pathlib import Path
 
@@ -90,19 +93,27 @@ class DockerRunner(Runner):
             return RunResult(ok=False, error=info.reason)
         root = Path(task_root).resolve()
         dockerfile = root / "environment" / "Dockerfile"
-        if not dockerfile.is_file():
-            return RunResult(ok=False, error="no environment/Dockerfile to build")
+        if not image and not dockerfile.is_file():
+            return RunResult(ok=False, error="no environment/Dockerfile to build and no prebuilt image declared")
         exe = shutil.which("docker") or "docker"
         # Unique per process and invocation: two concurrent checks in the same
         # second must not build/run/delete the same tag.
-        tag = f"envcert-check-{os.getpid()}-{uuid.uuid4().hex[:12]}"
+        tag = image or f"envcert-check-{os.getpid()}-{uuid.uuid4().hex[:12]}"
+        built = image is None
         start = time.time()
         try:
-            build = _run([exe, "build", "-t", tag, "-f", str(dockerfile), str(root / "environment")],
-                         min(timeout, 900))
-            if build.returncode != 0:
-                return RunResult(ok=False, error="docker build failed", stderr=(build.stderr or "")[-MAX_OUTPUT:],
-                                 duration_sec=round(time.time() - start, 3))
+            if image:
+                pull = _run([exe, "pull", image], min(timeout, 900))
+                if pull.returncode != 0:
+                    return RunResult(ok=False, error=f"docker pull failed for prebuilt image {image!r}",
+                                     stderr=(pull.stderr or "")[-MAX_OUTPUT:],
+                                     duration_sec=round(time.time() - start, 3))
+            else:
+                build = _run([exe, "build", "-t", tag, "-f", str(dockerfile), str(root / "environment")],
+                             min(timeout, 900))
+                if build.returncode != 0:
+                    return RunResult(ok=False, error="docker build failed", stderr=(build.stderr or "")[-MAX_OUTPUT:],
+                                     duration_sec=round(time.time() - start, 3))
             image_digest = None
             try:
                 insp = _run([exe, "image", "inspect", "--format", "{{.Id}}", tag], 30)
@@ -140,6 +151,9 @@ class DockerRunner(Runner):
                              stderr=(run.stderr or "")[-MAX_OUTPUT:], reward=reward,
                              duration_sec=round(time.time() - start, 3), image_digest=image_digest,
                              image_digest_note=(
+                                 "docker runner image is the task-declared prebuilt image; image_digest is the local image ID, "
+                                 "not a registry manifest digest"
+                             ) if image else (
                                  "docker runner image is locally built; image_digest is the local image ID, "
                                  "not a registry manifest digest"
                              ) if image_digest else "")
@@ -149,7 +163,8 @@ class DockerRunner(Runner):
         except Exception as exc:  # noqa: BLE001
             return RunResult(ok=False, error=f"{type(exc).__name__}: {exc}")
         finally:
-            try:
-                _run([exe, "rmi", "-f", tag], 60)
-            except Exception:  # noqa: BLE001
-                pass
+            if built:
+                try:
+                    _run([exe, "rmi", "-f", tag], 60)
+                except Exception:  # noqa: BLE001
+                    pass

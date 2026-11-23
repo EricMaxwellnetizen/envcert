@@ -323,10 +323,24 @@ def analyse_python(files: list[tuple[str, str]]) -> Analysis:
             continue
         out.files_parsed.append(path)
         _dangerous_hits(path, tree, out)
-        local_funcs: dict[str, bool] = {}
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                local_funcs[node.name] = any(isinstance(n, (ast.Compare, ast.Assert)) for n in ast.walk(node))
+        # Call-graph summaries with transitive validation: a helper that
+        # delegates to a comparing helper also validates (A -> B -> compare).
+        direct_logic: dict[str, bool] = {}
+        calls: dict[str, set[str]] = {}
+        func_nodes = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for node in func_nodes:
+            direct_logic[node.name] = any(isinstance(n, (ast.Compare, ast.Assert)) for n in ast.walk(node))
+            calls[node.name] = {c.func.id for c in ast.walk(node)
+                                if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+        local_funcs: dict[str, bool] = dict(direct_logic)
+        for _ in range(len(local_funcs) + 1):
+            changed = False
+            for name, callees in calls.items():
+                if not local_funcs.get(name) and any(local_funcs.get(callee) for callee in callees):
+                    local_funcs[name] = True
+                    changed = True
+            if not changed:
+                break
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 _analyse_function(path, node, out, local_funcs)

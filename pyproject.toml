@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "envcert"
-version = "0.4.3"
+version = "0.4.4"
 description = "Independent, extensible integrity verification and evidence generation for AI training and evaluation environments"
 readme = "README.md"
 license = { text = "Apache-2.0" }

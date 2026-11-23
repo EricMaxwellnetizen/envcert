@@ -35,6 +35,7 @@ nav:
       - Vulnerable task: demo/report-vulnerable.md
       - Dynamic + cheat battery: demo/report-dynamic.md
   - Releases:
+      - v0.4.4: releases/v0.4.4.md
       - v0.4.3: releases/v0.4.3.md
       - v0.4.2: releases/v0.4.2.md
       - v0.4.1: releases/v0.4.1.md

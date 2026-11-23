@@ -19,8 +19,9 @@ the README and check catalog describe what exists today.
   files, so validated grading pipelines stop producing review WARNs.
 - [#3 NeMo Gym Resources-Server (HTTP) probing](https://github.com/EricMaxwellnetizen/envcert/issues/3):
   opt-in gold/mutant/swap probing against a user-supplied endpoint.
-- [#4 Dynamic execution for docker-compose and prebuilt-image tasks](https://github.com/EricMaxwellnetizen/envcert/issues/4),
-  including the EC066 cheat battery under compose.
+- [#4 Dynamic execution for docker-compose and prebuilt-image tasks](https://github.com/EricMaxwellnetizen/envcert/issues/4):
+  prebuilt-image execution shipped in 0.4.4 (incl. EC066); compose
+  services remain.
 - Deterministic SWE-bench instance strengthening floor: mutant *patches*
   against FAIL_TO_PASS sets without LLM test generation (the offline
   complement to SWE-ABS, see `docs/research/RESEARCH_FINDINGS.md`).

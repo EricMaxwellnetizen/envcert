@@ -1,12 +1,12 @@
 """Example custom check (not registered by default).
 
 Copy this pattern into your own module, import the module so `@check`
-registers it, and run EnvCert from your own entry point — or contribute it
+registers it, and run Envicert from your own entry point — or contribute it
 upstream with tests (see docs/guides/WRITING_A_CHECK.md).
 Stable IDs above EC900 are reserved for local/experimental checks.
 """
-from envcert.checks.base import CheckInfo, check, finding, not_applicable, passed
-from envcert.core.models import Severity, Status
+from envicert.checks.base import CheckInfo, check, finding, not_applicable, passed
+from envicert.core.models import Severity, Status
 
 EC900 = CheckInfo(
     "EC900", "Example: verifier timeout is declared", "verifier", Severity.LOW,

@@ -4,7 +4,7 @@ Date: 2026-11-22. Legend: **Y** = verified in a primary source, **N** = verified
 absent (looked for, not found in docs/repo), **?** = unknown / not verified.
 Do not read `?` as "missing".
 
-| Capability | EnvCert (this repo) | BenchJack | trustworthy-env | Harbor | NeMo Gym | Inspect AI | Hadolint | Semgrep | Trivy |
+| Capability | Envicert (this repo) | BenchJack | trustworthy-env | Harbor | NeMo Gym | Inspect AI | Hadolint | Semgrep | Trivy |
 |---|---|---|---|---|---|---|---|---|---|
 | Static analysis of task bundles | Y | Y | Y | ? (task load validation) | ? | N (different layer) | Dockerfile only | generic code | image/CVE |
 | Dynamic validation (gold run) | Y (opt-in docker/local) | Y (exploit runs) | Y (runtime stage) | Y | Y (`gym dataset validate`) | Y (eval runs) | N | N | N |
@@ -27,7 +27,7 @@ Do not read `?` as "missing".
 | Maintenance activity (at research time) | new | active (2026) | active (2026) | active | active | active | maintained | active | active |
 
 Licence cells marked `(?)` were not re-verified for every project in this
-session and must be checked before any code reuse. EnvCert reuses **no code**
+session and must be checked before any code reuse. Envicert reuses **no code**
 from any of these projects; it interoperates with Harbor's documented task
 format and in-toto's published predicate types only.
 
@@ -37,19 +37,19 @@ format and in-toto's published predicate types only.
   schema'd report + SARIF + policy exit codes + digest-bound attestation,
   offline, no LLM — is not occupied by a verified competitor.
 - BenchJack/trustworthy-env are stronger at *discovering novel exploits*
-  (agent + PoC). EnvCert is deliberately weaker there and stronger at
+  (agent + PoC). Envicert is deliberately weaker there and stronger at
   *repeatable CI evidence*. These are complementary; docs recommend running
-  an adversarial audit (BenchJack-style) in addition to EnvCert for
+  an adversarial audit (BenchJack-style) in addition to Envicert for
   high-stakes benchmarks.
 
 ## 0.4.0 update (2026-11-22, see PRODUCT_REVIEW.md)
 
-EnvCert 0.4.0 adds capabilities with no verified equivalent above:
+Envicert 0.4.0 adds capabilities with no verified equivalent above:
 deterministic cheat-agent battery (EC066 — executed false-pass proof
 without an LLM), AST data-flow reward-provenance analysis (EC054/EC056),
 bare dataset-file auditing (EC080–EC084: answer leakage, duplicates,
 split overlap, degenerate labels), deterministic auto-remediation
-(`envcert fix`), task scaffolding (`envcert new`), Markdown/HTML
+(`envicert fix`), task scaffolding (`envicert new`), Markdown/HTML
 reports, Action PR comments/step summaries, pre-commit hooks and
 entry-point plugin checks. The rows above predate 0.4.0 where they
-describe EnvCert as task-bundle-only or heuristic-only.
+describe Envicert as task-bundle-only or heuristic-only.

@@ -1,8 +1,8 @@
-# EnvCert
+# Envicert
 
 **Integrity verification and evidence for AI training and evaluation environments.**
 
-EnvCert checks whether the thing you measure models with is trustworthy:
+Envicert checks whether the thing you measure models with is trustworthy:
 a task bundle (instruction, Docker environment, reference solution,
 verifier) or the dataset file itself (JSONL/JSON/CSV/Parquet). Is the
 answer leaked to the agent? Can agent-controlled files influence the
@@ -10,12 +10,12 @@ verifier? Would a *cheating* solution pass? Are train and test rows the
 same rows? Is the build reproducible, the evidence verifiable?
 
 ```bash
-pip install envcert
-envcert check ./my-task
-envcert check ./train.jsonl
-envcert check ./my-task --execution docker   # gold + no-op + cheat battery
-envcert fix ./my-task                        # deterministic remediation
-envcert new ./my-new-task                    # scaffold that passes check
+pip install envicert
+envicert check ./my-task
+envicert check ./train.jsonl
+envicert check ./my-task --execution docker   # gold + no-op + cheat battery
+envicert fix ./my-task                        # deterministic remediation
+envicert new ./my-new-task                    # scaffold that passes check
 ```
 
 - [Quickstart](guides/QUICKSTART.md)
@@ -25,5 +25,5 @@ envcert new ./my-new-task                    # scaffold that passes check
 - [Real-world pilot (Harbor, Terminal-Bench, SWE-bench, Harbor Hub)](research/PILOT_040.md)
 - [Competitive analysis](research/COMPETITIVE_ANALYSIS.md)
 
-EnvCert reports evidence about checked properties; it is not a
+Envicert reports evidence about checked properties; it is not a
 certification that an environment is unhackable.

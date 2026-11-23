@@ -1,5 +1,5 @@
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 
 
 def by_id(report):
@@ -142,7 +142,7 @@ def test_disabled_check_not_run(basic_task):
 
 
 def test_crashing_check_becomes_error_not_pass(monkeypatch, basic_task):
-    from envcert.checks.base import REGISTRY
+    from envicert.checks.base import REGISTRY
 
     _info, _fn = REGISTRY["EC002"]
 

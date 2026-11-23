@@ -11,21 +11,21 @@ import sys
 
 import pytest
 
-from envcert.attestations.intoto import (
+from envicert.attestations.intoto import (
     build_statement,
     dsse_envelope_unsigned,
     dsse_pae,
 )
-from envcert.checks.base import REGISTRY
-from envcert.cli.main import main, validate_report
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks, selected_checks
-from envcert.core.report import (
+from envicert.checks.base import REGISTRY
+from envicert.cli.main import main, validate_report
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks, selected_checks
+from envicert.core.report import (
     KNOWN_REGISTRY_SNAPSHOTS,
     registry_snapshot,
     validate_report_consistency,
 )
-from envcert.runners.external_runner import ExternalRunner
+from envicert.runners.external_runner import ExternalRunner
 
 ROOT = "examples"
 SAFE = f"{ROOT}/safe-environment"
@@ -110,7 +110,7 @@ def test_report_cannot_claim_checks_from_another_version(tmp_path):
     report = _report(tmp_path)
     report["checks_available"] = report["checks_available"] + ["EC999"]
     problems = validate_report_consistency(report)
-    assert any("unknown to this EnvCert version" in p for p in problems), problems
+    assert any("unknown to this Envicert version" in p for p in problems), problems
 
 
 def test_registry_snapshots_are_stable():
@@ -119,14 +119,14 @@ def test_registry_snapshots_are_stable():
     assert len(KNOWN_REGISTRY_SNAPSHOTS[(0, 3)]) == 35
     assert len(KNOWN_REGISTRY_SNAPSHOTS[(0, 4)]) == 43
     assert set(REGISTRY) == set(KNOWN_REGISTRY_SNAPSHOTS[(0, 4)])
-    assert registry_snapshot({"envcert_version": "0.2.0"}) == KNOWN_REGISTRY_SNAPSHOTS[(0, 2)]
-    assert registry_snapshot({"envcert_version": "0.3.2"}) == KNOWN_REGISTRY_SNAPSHOTS[(0, 3)]
-    assert registry_snapshot({"envcert_version": "9.9.9"}) is None
+    assert registry_snapshot({"envicert_version": "0.2.0"}) == KNOWN_REGISTRY_SNAPSHOTS[(0, 2)]
+    assert registry_snapshot({"envicert_version": "0.3.2"}) == KNOWN_REGISTRY_SNAPSHOTS[(0, 3)]
+    assert registry_snapshot({"envicert_version": "9.9.9"}) is None
 
 
 def test_pre_030_reports_still_skip_partition_checks():
     old = {
-        "envcert_version": "0.2.0",
+        "envicert_version": "0.2.0",
         "environment": {"bundle_digest_sha256": "a" * 64, "file_count": 3},
         "execution": {"fail_on": ["CRITICAL", "HIGH"]},
         "policy": {"passed": True, "fail_on": ["CRITICAL", "HIGH"]},
@@ -428,7 +428,7 @@ def test_fake_dsse_signature_fails_closed(tmp_path, capsys):
 
 def test_build_statement_excludes_baseline_suppressed_failures():
     report = {
-        "envcert_version": "0.3.3",
+        "envicert_version": "0.3.3",
         "schema_version": "1.0.0",
         "generated_at": "2026-01-01T00:00:00Z",
         "assurance_context": "test",
@@ -442,7 +442,7 @@ def test_build_statement_excludes_baseline_suppressed_failures():
         }],
     }
     statement = build_statement(report, b"{}")
-    assert statement["predicate"]["x-envcert"]["failing_check_ids"] == []
+    assert statement["predicate"]["x-envicert"]["failing_check_ids"] == []
     assert statement["predicate"]["result"] == "PASSED"
 
 
@@ -452,7 +452,7 @@ def test_dsse_pae_matches_the_specification():
     )
     envelope = dsse_envelope_unsigned({"a": 1})
     assert envelope["signatures"] == []
-    assert "UNSIGNED" in envelope["_envcert_note"]
+    assert "UNSIGNED" in envelope["_envicert_note"]
 
 
 def test_external_runner_reports_a_missing_command():

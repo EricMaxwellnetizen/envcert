@@ -1,6 +1,6 @@
-name: EnvCert
+name: Envicert
 description: Integrity checks and evidence for AI training/evaluation environments (Harbor tasks)
-author: EnvCert contributors
+author: Envicert contributors
 branding:
   icon: shield
   color: blue
@@ -24,7 +24,7 @@ inputs:
   report:
     description: Report file to write
     required: false
-    default: "envcert-report.json"
+    default: "envicert-report.json"
   sarif:
     description: Optional SARIF file to write (for GitHub code scanning upload)
     required: false
@@ -34,7 +34,7 @@ inputs:
     required: false
     default: "none"
   version:
-    description: EnvCert version to install from PyPI (ignored when this action is used from a local checkout containing pyproject.toml)
+    description: Envicert version to install from PyPI (ignored when this action is used from a local checkout containing pyproject.toml)
     required: false
     default: ""
   upload-artifact:
@@ -60,22 +60,22 @@ runs:
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: "3.12"
-    - name: Install EnvCert
+    - name: Install Envicert
       shell: bash
       env:
         ENVCERT_VERSION: ${{ inputs.version }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        if [ -f "$ACTION_PATH/pyproject.toml" ] && grep -q 'name = "envcert"' "$ACTION_PATH/pyproject.toml"; then
+        if [ -f "$ACTION_PATH/pyproject.toml" ] && grep -q 'name = "envicert"' "$ACTION_PATH/pyproject.toml"; then
           python -m pip install "$ACTION_PATH"
         elif [ -n "$ENVCERT_VERSION" ]; then
-          python -m pip install "envcert==$ENVCERT_VERSION"
+          python -m pip install "envicert==$ENVCERT_VERSION"
         else
-          python -m pip install envcert
+          python -m pip install envicert
         fi
-        envcert version
-    - name: Run EnvCert (static by default)
+        envicert version
+    - name: Run Envicert (static by default)
       shell: bash
       env:
         TASK_PATH: ${{ inputs.path }}
@@ -88,11 +88,11 @@ runs:
       run: |
         set -euo pipefail
         args=(check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format "$FORMAT" --output "$REPORT")
-        echo "+ envcert ${args[*]}"
+        echo "+ envicert ${args[*]}"
         status=0
-        envcert "${args[@]}" || status=$?
+        envicert "${args[@]}" || status=$?
         if [ -n "$SARIF" ]; then
-          envcert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format sarif --output "$SARIF" || true
+          envicert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format sarif --output "$SARIF" || true
         fi
         exit "$status"
     - name: Publish summary and PR comment
@@ -108,8 +108,8 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        md="$(mktemp envcert-summary-XXXXXX.md)"
-        envcert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format markdown --output "$md" || true
+        md="$(mktemp envicert-summary-XXXXXX.md)"
+        envicert check "$TASK_PATH" --profile "$PROFILE" --fail-on "$FAIL_ON" --execution "$EXECUTION" --format markdown --output "$md" || true
         if [ "$WANT_SUMMARY" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           cat "$md" >> "$GITHUB_STEP_SUMMARY"
         fi
@@ -121,7 +121,7 @@ runs:
       if: ${{ inputs.upload-artifact == 'true' && !cancelled() }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: envcert-reports
+        name: envicert-reports
         path: |
           ${{ inputs.report }}
           ${{ inputs.sarif }}

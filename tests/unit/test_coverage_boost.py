@@ -5,16 +5,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from envcert.attestations.intoto import build_statement, verify_statement_local
-from envcert.core.config import load_settings
-from envcert.runners import docker_runner
-from envcert.runners.external_runner import ExternalRunner, split_runner_command
-from envcert.runners.nemo_probe import probe_verifier
+from envicert.attestations.intoto import build_statement, verify_statement_local
+from envicert.core.config import load_settings
+from envicert.runners import docker_runner
+from envicert.runners.external_runner import ExternalRunner, split_runner_command
+from envicert.runners.nemo_probe import probe_verifier
 
 
 def _report():
     return {
-        "envcert_version": "0.4.0", "schema_version": "1.0.0",
+        "envicert_version": "0.4.0", "schema_version": "1.0.0",
         "generated_at": "2026-01-01T00:00:00Z", "assurance_context": "test",
         "environment": {"task_name": "t/t", "bundle_digest_sha256": "a" * 64,
                         "verifier_digest_sha256": "b" * 64, "solution_digest_sha256": None,
@@ -44,7 +44,7 @@ def test_statement_local_verification_roundtrip_and_tamper():
 
 
 def test_cosign_paths_with_fake_cosign(tmp_path, monkeypatch):
-    import envcert.attestations.intoto as intoto
+    import envicert.attestations.intoto as intoto
 
     monkeypatch.setattr(intoto, "cosign_available", lambda: "cosign")
     calls = []
@@ -80,7 +80,7 @@ def test_cosign_paths_with_fake_cosign(tmp_path, monkeypatch):
 
 
 def test_watch_mode_runs_bounded_iterations(tmp_path, capsys):
-    from envcert.cli.main import main
+    from envicert.cli.main import main
 
     rc = main(["check", "examples/safe-environment", "--watch", "--watch-interval", "1", "--watch-iterations", "2"])
     assert rc == 0
@@ -91,7 +91,7 @@ def test_watch_mode_runs_bounded_iterations(tmp_path, capsys):
 def test_parquet_without_pyarrow_is_reported(tmp_path):
     data = tmp_path / "rows.parquet"
     data.write_bytes(b"PAR1 fake parquet bytes PAR1")
-    from envcert.core.engine import run_checks
+    from envicert.core.engine import run_checks
 
     report = run_checks(data, load_settings(None, None, None), adapter_name="dataset")
     statuses = {f["check_id"]: f["status"] for f in report["findings"]}

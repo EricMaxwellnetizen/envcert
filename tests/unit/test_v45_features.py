@@ -4,10 +4,10 @@ import json
 import pytest
 from test_v4_features import BASIC, by_id, statuses  # noqa: F401
 
-from envcert.checks.mutation_js import mutation_sites, run_js_mutation
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
-from envcert.runners.nemo_probe import probe_http_verifier
+from envicert.checks.mutation_js import mutation_sites, run_js_mutation
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
+from envicert.runners.nemo_probe import probe_http_verifier
 
 # --------------------------------------------------------------- HTTP probe
 
@@ -111,9 +111,9 @@ def test_http_probe_unreachable_endpoint_yields_error_finding(tmp_path):
 
 
 def test_config_nemo_headers_must_be_strings(tmp_path):
-    from envcert.core.errors import ConfigError
+    from envicert.core.errors import ConfigError
 
-    cfg = tmp_path / "envcert.toml"
+    cfg = tmp_path / "envicert.toml"
     cfg.write_text('[checks.nemo]\nendpoint = "https://example.com/v"\nheaders = { A = 1 }\n',
                    encoding="utf-8")
     with pytest.raises(ConfigError):
@@ -121,7 +121,7 @@ def test_config_nemo_headers_must_be_strings(tmp_path):
 
 
 def test_config_nemo_endpoint_from_file(tmp_path):
-    cfg = tmp_path / "envcert.toml"
+    cfg = tmp_path / "envicert.toml"
     cfg.write_text('[checks.nemo]\nendpoint = "https://example.com/verify"\n'
                    'headers = { Authorization = "Bearer x" }\n', encoding="utf-8")
     settings = load_settings(cfg, None, None)
@@ -130,7 +130,7 @@ def test_config_nemo_endpoint_from_file(tmp_path):
 
 
 def test_cli_rejects_bad_nemo_endpoint(tmp_path):
-    from envcert.cli.main import main
+    from envicert.cli.main import main
 
     task = _make_task(tmp_path)
     rc = main(["check", str(task), "--nemo-endpoint", "ftp://example.com/verify"])
@@ -154,7 +154,7 @@ def test_js_mutation_without_tests(tmp_path):
 
 
 def test_js_mutation_requires_node(monkeypatch, tmp_path):
-    monkeypatch.setattr("envcert.checks.mutation_js.shutil.which", lambda name: None)
+    monkeypatch.setattr("envicert.checks.mutation_js.shutil.which", lambda name: None)
     report = run_js_mutation(tmp_path)
     assert report["eligible"] == 0
     assert "node" in report["error"]

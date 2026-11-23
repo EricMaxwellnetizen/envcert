@@ -1,8 +1,8 @@
-# Release readiness report — EnvCert 0.4.5
+# Release readiness report — Envicert 0.4.5
 
 **Status: releasable.** All code, checks, tests, docs and release assets for
 0.4.5 are committed to `main` at `6270ac5`, tagged `v0.4.5` (remote peel
-verified), published to PyPI as `envcert==0.4.5`, and released on GitHub.
+verified), published to PyPI as `envicert==0.4.5`, and released on GitHub.
 GitHub Actions (CI, Release, Security, Docs) all pass on `6270ac5`.
 The release was executed by the founding team; the only item that required
 an external party's manual action is closing the now-resolved roadmap issues
@@ -13,19 +13,19 @@ but cannot change issue state).
 ## 1. Current project version
 
 - `pyproject.toml` `version = "0.4.5"` (PEP 440)
-- `envcert/__init__.py` `__version__ = "0.4.5"`
+- `envicert/__init__.py` `__version__ = "0.4.5"`
 - Git tag `v0.4.5` → commit `6270ac5`; remote `refs/tags/v0.4.5^{}` peels to
   `6270ac5` (verified with `git ls-remote --tags origin`)
 - Moving tag `v0` → `6270ac5` (forced push)
-- PyPI: `envcert==0.4.5` published and verified installable in a clean venv
-  outside the repo (`%TEMP%\envcert-pypi-0.4.5`)
+- PyPI: `envicert==0.4.5` published and verified installable in a clean venv
+  outside the repo (`%TEMP%\envicert-pypi-0.4.5`)
 
 ## 2. Installation method
 
-- `pip install envcert==0.4.5` (PyPI)
-- `uv add envcert==0.4.5` / `uv pip install envcert==0.4.5`
+- `pip install envicert==0.4.5` (PyPI)
+- `uv add envicert==0.4.5` / `uv pip install envicert==0.4.5`
 - From source: `uv sync` / `pip install -e .` in this checkout
-- Console entry point: `envcert` (registered in `pyproject.toml`)
+- Console entry point: `envicert` (registered in `pyproject.toml`)
 - Supported Python: `>=3.11` (target-3.11 declared)
 - Minimal static-analysis dependency footprint; optional groups for dynamic
   execution (`docker`) and attestation signing (`cosign`) are installed only
@@ -36,7 +36,7 @@ but cannot change issue state).
 Build artifacts exist locally for prior releases under `dist/` (wheels and
 sdists 0.3.1–0.4.4). The 0.4.5 sdist/wheel were built and uploaded by the
 Release GitHub Action on tag push and published to PyPI; PyPI publication was
-independently verified by installing `envcert==0.4.5` into a clean virtual
+independently verified by installing `envicert==0.4.5` into a clean virtual
 environment outside the repo and confirming the presence of
 `mutation_js`, `probe_http_verifier`, `nemo_endpoint`/`nemo_headers`,
 `_semantic_pairs`, `compose_path` in `site-packages`.
@@ -68,7 +68,7 @@ procedure).
 - NeMo Gym datasets (`dataset.toml` / `*.jsonl` rows + `verifier.py`)
 - Inspect eval directories (`*.py` scorer files, UK AISI `inspect_evals`)
 - SWE-bench-style dataset files (`.jsonl` / `.json` / `.csv` / `.parquet`)
-- Single dataset files passed directly to `envcert check <file> --dataset`
+- Single dataset files passed directly to `envicert check <file> --dataset`
 
 ## 6. Implemented checks
 
@@ -92,7 +92,7 @@ EC085 grading-spec consistency.
 
 Each check is documented with purpose, implementation, default severity,
 remediation and limitations; stable check IDs are the public interface
-(`docs/architecture/CHECK_CATALOG.md`, `envcert check --explain <EC###>`).
+(`docs/architecture/CHECK_CATALOG.md`, `envicert check --explain <EC###>`).
 
 ## 7. Deferred checks / scope
 
@@ -125,7 +125,7 @@ remediation and limitations; stable check IDs are the public interface
 
 ## 9. Attestation status
 
-- `envcert/attestations/intoto.py`: in-toto Statement v1 + Test Result
+- `envicert/attestations/intoto.py`: in-toto Statement v1 + Test Result
   predicate (`https://in-toto.io/attestation/test-result/v0.1`) — no invented
   predicate.
 - Subjects bound by digest: task bundle, verifier, reference solution, OCI
@@ -133,7 +133,7 @@ remediation and limitations; stable check IDs are the public interface
 - Predicate carries: result (PASSED/FAILED), configurationSource digest,
   execution identity/time (`generated_at`), profile, adapter, checks executed,
   failing check IDs, limitations, `signed` flag.
-- `x-envcert` extension documented; report digest binds statement to exact
+- `x-envicert` extension documented; report digest binds statement to exact
   report file; consumers fetch the report by digest.
 - Local unsigned statement generation works without any signing dependency;
   `verify_statement_local` provides structural verification without crypto.
@@ -142,7 +142,7 @@ remediation and limitations; stable check IDs are the public interface
   `cosign_verify_attestation`, `cosign_verify_blob`, `sign_with_cosign`;
   when cosign is unavailable the statement is explicitly labelled `UNSIGNED`
   and never described as cryptographically verified.
-- `envcert check --attest ...` / `cmd_attest` and `envcert verify-attestation`
+- `envicert check --attest ...` / `cmd_attest` and `envicert verify-attestation`
   CLI commands implemented.
 
 ## 10. Outstanding release blockers
@@ -156,7 +156,7 @@ None for 0.4.5 itself.
   "Completed" — optional, does not block the release.
 - **Issue #6** (Harbor Hub listing, external adoption, paper peer review):
   open by design — third-party dependent; tracked in GitHub issue #6; no
-  action available to EnvCert unilaterally.
+  action available to Envicert unilaterally.
 
 ## 11. Steps needed to publish publicly
 
@@ -166,7 +166,7 @@ All publication steps for 0.4.5 are complete:
 2. Tag `v0.4.5` created and pushed ✅
 3. GitHub Release `v0.4.5` created from `docs/releases/v0.4.5.md` ✅
 4. Missing `v0.4.4` GitHub Release also created ✅
-5. PyPI `envcert==0.4.5` published ✅
+5. PyPI `envicert==0.4.5` published ✅
 6. Clean-venv PyPI install verified ✅
 7. Release workflow success ✅
 

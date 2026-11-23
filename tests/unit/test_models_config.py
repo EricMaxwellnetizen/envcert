@@ -1,8 +1,8 @@
 import pytest
 
-from envcert.core.config import load_settings
-from envcert.core.errors import ConfigError
-from envcert.core.models import Finding, Severity, Status, is_failure
+from envicert.core.config import load_settings
+from envicert.core.errors import ConfigError
+from envicert.core.models import Finding, Severity, Status, is_failure
 
 
 def test_severity_rank_and_failure():
@@ -30,15 +30,15 @@ def test_unknown_profile_rejected(tmp_path):
 
 
 def test_bad_config_values(tmp_path):
-    cfg = tmp_path / "envcert.toml"
+    cfg = tmp_path / "envicert.toml"
     cfg.write_text('[policy]\nfail_on = ["banana"]\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_settings(cfg, None, None)
 
 
 def test_config_file_overrides(tmp_path):
-    cfg = tmp_path / "envcert.toml"
-    cfg.write_text('[envcert]\nprofile = "minimal"\n[checks]\ndisabled = ["EC031"]\n', encoding="utf-8")
+    cfg = tmp_path / "envicert.toml"
+    cfg.write_text('[envicert]\nprofile = "minimal"\n[checks]\ndisabled = ["EC031"]\n', encoding="utf-8")
     s = load_settings(cfg, None, None)
     assert s.profile == "minimal"
     assert "EC031" in s.disabled

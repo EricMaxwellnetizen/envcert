@@ -1,11 +1,11 @@
 import json
 import pathlib
 
-from envcert.cli.main import main
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
-from envcert.core.rollup import find_task_folders, run_dataset_rollup
-from envcert.reports.sarif import to_sarif
+from envicert.cli.main import main
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
+from envicert.core.rollup import find_task_folders, run_dataset_rollup
+from envicert.reports.sarif import to_sarif
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"
@@ -53,7 +53,7 @@ def test_dataset_rollup():
     folders = find_task_folders(EXAMPLES / "dataset-rollup")
     assert len(folders) == 2
     rollup = run_dataset_rollup(EXAMPLES / "dataset-rollup", load_settings(None, None, None))
-    assert rollup["kind"] == "envcert-dataset-rollup"
+    assert rollup["kind"] == "envicert-dataset-rollup"
     assert rollup["summary"]["tasks"] == 2
     assert rollup["summary"]["policy_passed_tasks"] == 1
     assert rollup["summary"]["overall_policy_passed"] is False
@@ -70,7 +70,7 @@ def test_dataset_rollup_cli(tmp_path, capsys):
 
 
 def test_baseline_suppresses_policy_and_sarif(tmp_path, basic_task):
-    from envcert.core.engine import run_checks as rc2
+    from envicert.core.engine import run_checks as rc2
 
     vuln = rc2(EXAMPLES / "intentionally-vulnerable-environment", load_settings(None, None, None))
     baseline = tmp_path / "baseline.json"

@@ -1,11 +1,11 @@
 # Industry readiness
 
-What "done enough to adopt" means for EnvCert, and the evidence behind each
+What "done enough to adopt" means for Envicert, and the evidence behind each
 claim. This page is the operator-facing counterpart to the research pilots:
 it states the deployment envelope, the guarantees, the limits, and the
-checklist an organisation should follow before making EnvCert a gate.
+checklist an organisation should follow before making Envicert a gate.
 
-EnvCert is an independent verification and evidence layer. It is **not** a
+Envicert is an independent verification and evidence layer. It is **not** a
 certification authority and never claims an environment is unhackable.
 
 ## 1. Deployment envelope
@@ -13,12 +13,12 @@ certification authority and never claims an environment is unhackable.
 | Concern | Position |
 |---|---|
 | Runtime | Python 3.11+; **zero runtime dependencies**; no account, API key, LLM or network for static/dataset checks |
-| Install | `pip install envcert` (PyPI), `pipx`, a pinned GitHub Action, or a checkout |
-| Interfaces | CLI (`check`, `fix`, `new`, `verify`, `attest`, `verify-attestation`, `list-checks`, `explain`, `schema`), JSON/ SARIF/Markdown/HTML reports, pre-commit hooks, plugin checks via the `envcert.checks` entry point |
+| Install | `pip install envicert` (PyPI), `pipx`, a pinned GitHub Action, or a checkout |
+| Interfaces | CLI (`check`, `fix`, `new`, `verify`, `attest`, `verify-attestation`, `list-checks`, `explain`, `schema`), JSON/ SARIF/Markdown/HTML reports, pre-commit hooks, plugin checks via the `envicert.checks` entry point |
 | Dynamic modes | `docker` (restricted container, shared host kernel), `local-python` (trusted tasks only, **no sandbox**), `external` (operator's disposable VM/remote runner) |
 | Scale | 723 task bundles, the full 2,294-row SWE-bench test split and 131 Inspect evaluations in the 0.4.3/0.4.5 pilots; see `PILOT_SCALE.md` |
 | Determinism | Same bundle + same settings produce the same static findings; dynamic findings depend on the selected runner and are labelled with it |
-| Report contract | Schema `1.0.0`; `envcert verify` recomputes policy and summary counts and can re-run checks (`--recheck`); findings carry severity, confidence, evidence, remediation and limitations |
+| Report contract | Schema `1.0.0`; `envicert verify` recomputes policy and summary counts and can re-run checks (`--recheck`); findings carry severity, confidence, evidence, remediation and limitations |
 | Evidence | Optional in-toto Test Result attestation, DSSE/Cosign signing when installed; unsigned attestations are labelled unsigned |
 
 ## 2. What was proven at scale (not just unit-tested)
@@ -88,7 +88,7 @@ Not guaranteed:
 
 ## 4. Adoption checklist
 
-1. **Pin a version**: `envcert==0.4.5` or the Action at `@v0.4.5`
+1. **Pin a version**: `envicert==0.4.5` or the Action at `@v0.4.5`
    (`@v0` tracks the latest 0.x). Pin in CI, not just locally.
 2. **Gate pull requests on static checks** for every task/dataset change.
    Default policy fails on CRITICAL/HIGH; use `strict` to include MEDIUM
@@ -107,7 +107,7 @@ Not guaranteed:
    boundary of what was checked; a green report is not a claim of
    correctness.
 8. **Keep evidence**: store the JSON report and optional attestation as
-   release artifacts; `envcert verify report.json --task <task>` proves
+   release artifacts; `envicert verify report.json --task <task>` proves
    the report still matches the bundle.
 9. **Re-run the pilots per release** (Hub/Terminal-Bench/SWE-bench) and
    hand-review new policy drivers before believing them.

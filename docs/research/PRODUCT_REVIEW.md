@@ -1,13 +1,13 @@
-# Product review: is the problem real, is EnvCert necessary, is it novel?
+# Product review: is the problem real, is Envicert necessary, is it novel?
 
 Date: 2026-11-22 (0.4.0 review). Method: primary sources (project repos,
-official docs, arXiv papers) plus hands-on execution of EnvCert and its
+official docs, arXiv papers) plus hands-on execution of Envicert and its
 competitors' documented behaviour. Claims marked verified were read in a
 primary source or reproduced locally.
 
 ## 1. Does it solve a real problem?
 
-**Yes — verified, and worse than when EnvCert started.**
+**Yes — verified, and worse than when Envicert started.**
 
 - BenchJack (Berkeley Sky Lab, arXiv:2605.12673) synthesised exploits that
   score near-perfectly on 9/10 audited benchmarks *without solving any
@@ -32,7 +32,7 @@ artifact (task? dataset? verifier? image?) was actually measured.
 
 **Yes, but it is narrower than "nobody audits benchmarks".**
 
-| Need | BenchJack | trustworthy-env | Harbor/NeMo/Inspect | Trivy/Hadolint/Semgrep | EnvCert ≤0.3.x |
+| Need | BenchJack | trustworthy-env | Harbor/NeMo/Inspect | Trivy/Hadolint/Semgrep | Envicert ≤0.3.x |
 |---|---|---|---|---|---|
 | Find novel exploits | LLM agents + PoC | LLM + Z3 + PoC | no | no | no (by design) |
 | Deterministic, offline, CI-gateable | no (API keys) | partial | framework-internal | yes (wrong domain) | yes |
@@ -74,7 +74,7 @@ Claimed, and not found in any verified competitor:
    answer-in-prompt leakage, exact/near duplicates, train/test overlap,
    degenerate labels, broken rows — for the bare JSONL/JSON/CSV files
    RLVR and benchmark pipelines actually consume, no task bundle required.
-4. **Deterministic remediation (`envcert fix`)**: mechanical,
+4. **Deterministic remediation (`envicert fix`)**: mechanical,
    idempotent, dry-run-first fixes, in contrast to LLM repair loops.
 5. The evidence chain around all of it: stable check IDs, schema'd
    JSON/SARIF/Markdown/HTML, policy exit codes, digest-bound reports,
@@ -87,7 +87,7 @@ inputs no longer flagged); EC052 per-line conditional analysis (an `if`
 somewhere in the file no longer excuses an unconditional `echo 1`);
 SARIF partial fingerprints, suggested fixes and ERROR results; Markdown
 and single-file HTML reports; GitHub Action step-summary/PR-comment;
-pre-commit hooks; `envcert new` scaffolding that passes its own checks;
+pre-commit hooks; `envicert new` scaffolding that passes its own checks;
 entry-point plugin checks.
 
 Not built, deliberately: LLM exploit discovery (cedes the determinism
@@ -103,11 +103,11 @@ score (conceals critical failures — see prompt.md §4.3).
 - Real data: 30 SWE-bench Lite rows fetched live from the Hugging Face
   datasets server — adapter detected `problem_statement`/`patch`,
   EC080–EC084 PASS (one low-confidence EC013 warning on issue text).
-- `envcert fix --apply` on the intentionally-vulnerable example flips
+- `envicert fix --apply` on the intentionally-vulnerable example flips
   EC010/EC011/EC020/EC033 to PASS; other intentional flaws still fail.
 - Cheat battery on `examples/python-task` (local-python): EC066 PASS;
   tests prove an existence-only verifier ACCEPTS the stub cheat (FAIL).
-- `envcert new` scaffold passes `envcert check` (asserted in tests).
+- `envicert new` scaffold passes `envicert check` (asserted in tests).
 
 ## 6. Honest limits
 

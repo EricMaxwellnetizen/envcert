@@ -503,7 +503,7 @@ wheels = [
 ]
 
 [[package]]
-name = "envcert"
+name = "envicert"
 version = "0.4.4"
 source = { editable = "." }
 

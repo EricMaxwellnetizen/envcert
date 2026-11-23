@@ -1,0 +1,20 @@
+# Envicert with SARIF upload to GitHub code scanning.
+name: envicert-sarif
+on: [pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  envicert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install envicert
+      - name: Run Envicert and write SARIF
+        run: envicert check ./my-task --format sarif --output envicert.sarif
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: envicert.sarif
+      - name: Enforce policy
+        run: envicert check ./my-task --quiet --format json --output envicert-report.json

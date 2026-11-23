@@ -8,10 +8,10 @@ import json
 
 import pytest
 
-from envcert.cli.main import main
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
-from envcert.core.report import validate_baseline_suppression
+from envicert.cli.main import main
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
+from envicert.core.report import validate_baseline_suppression
 
 ROOT = "examples"
 
@@ -24,7 +24,7 @@ def _by_id(report):
 
 
 def test_missing_pytest_never_produces_a_false_pass(monkeypatch):
-    import envcert.runners.local_runner as local_runner
+    import envicert.runners.local_runner as local_runner
 
     monkeypatch.setattr(local_runner, "pytest_available", lambda: False)
     settings = load_settings(None, None, {"execution": "local-python", "mutation": True})
@@ -41,7 +41,7 @@ def test_missing_pytest_never_produces_a_false_pass(monkeypatch):
 
 
 def test_runner_info_reports_missing_pytest(monkeypatch):
-    import envcert.runners.local_runner as local_runner
+    import envicert.runners.local_runner as local_runner
 
     monkeypatch.setattr(local_runner, "pytest_available", lambda: False)
     info = local_runner.LocalPythonRunner().info()
@@ -50,7 +50,7 @@ def test_runner_info_reports_missing_pytest(monkeypatch):
 
 
 def test_mutation_execution_errors_are_not_counted_as_rejections(monkeypatch, tmp_path):
-    import envcert.checks.mutation as mutation
+    import envicert.checks.mutation as mutation
 
     calls = {"n": 0}
     real = mutation.LocalPythonRunner.run_python_verifier
@@ -59,7 +59,7 @@ def test_mutation_execution_errors_are_not_counted_as_rejections(monkeypatch, tm
         calls["n"] += 1
         if calls["n"] == 1:  # gold run
             return real(self, workdir, timeout=timeout)
-        from envcert.runners.base import RunResult
+        from envicert.runners.base import RunResult
 
         return RunResult(ok=False, error="runner exploded", reward=None)
 
@@ -184,7 +184,7 @@ def test_verify_fail_on_rejects_bad_input(tmp_path, severity, capsys):
 
 def _minimal_report(version, summary):
     return {
-        "envcert_version": version,
+        "envicert_version": version,
         "environment": {"bundle_digest_sha256": "a" * 64, "file_count": 3},
         "execution": {"fail_on": ["CRITICAL", "HIGH"]},
         "policy": {"passed": True, "fail_on": ["CRITICAL", "HIGH"]},
@@ -196,7 +196,7 @@ def _minimal_report(version, summary):
 
 
 def test_pre_030_reports_may_omit_summary_counters():
-    from envcert.core.report import validate_report_consistency
+    from envicert.core.report import validate_report_consistency
 
     old = _minimal_report("0.2.0", {"total_findings": 1, "by_status": {"PASS": 1}})
     assert validate_report_consistency(old) == []
@@ -207,10 +207,10 @@ def test_pre_030_reports_may_omit_summary_counters():
 
 
 def test_shell_mutation_execution_errors_are_not_rejections(monkeypatch):
-    import envcert.checks.dynamic_checks as dyn
-    from envcert.checks.base import CheckContext
-    from envcert.core.engine import load_task
-    from envcert.runners.base import RunnerInfo, RunResult
+    import envicert.checks.dynamic_checks as dyn
+    from envicert.checks.base import CheckContext
+    from envicert.core.engine import load_task
+    from envicert.runners.base import RunnerInfo, RunResult
 
     class FakeDockerRunner:
         calls = 0

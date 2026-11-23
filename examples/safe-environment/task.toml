@@ -1,7 +1,7 @@
 schema_version = "1.4"
 [task]
-name = "envcert/hello-file"
-authors = [{name="EnvCert contributors"}]
+name = "envicert/hello-file"
+authors = [{name="Envicert contributors"}]
 [metadata]
 category = "programming"
 difficulty_explanation = "Write a greeting file."

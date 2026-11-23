@@ -1,11 +1,11 @@
 import json
 
-import envcert.checks.external_checks as ext
-from envcert.attestations.intoto import build_statement, cosign_attest_image, dsse_envelope_unsigned
-from envcert.checks.base import CheckContext
-from envcert.cli.main import main
-from envcert.core.config import load_settings
-from envcert.core.engine import load_task, run_checks
+import envicert.checks.external_checks as ext
+from envicert.attestations.intoto import build_statement, cosign_attest_image, dsse_envelope_unsigned
+from envicert.checks.base import CheckContext
+from envicert.cli.main import main
+from envicert.core.config import load_settings
+from envicert.core.engine import load_task, run_checks
 
 
 def _ctx(task_path, external=True):
@@ -86,7 +86,7 @@ def test_verify_attestation_unsigned_dsse_fails_without_opt_in(tmp_path, basic_t
 
 
 def test_verify_attestation_checks_detached_signature(monkeypatch, tmp_path, basic_task, capsys):
-    import envcert.cli.main as cli
+    import envicert.cli.main as cli
 
     report = run_checks(basic_task, load_settings(None, None, None))
     att = tmp_path / "att.json"
@@ -105,7 +105,7 @@ def test_verify_attestation_checks_detached_signature(monkeypatch, tmp_path, bas
 
 
 def test_attest_with_image_requires_cosign(monkeypatch, tmp_path, basic_task, capsys):
-    import envcert.attestations.intoto as intoto
+    import envicert.attestations.intoto as intoto
 
     monkeypatch.setattr(intoto, "cosign_available", lambda: None)
     report_path = tmp_path / "r.json"

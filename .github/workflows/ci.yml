@@ -19,17 +19,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e ".[dev]"
-      - run: ruff check envcert tests
-      - run: mypy envcert
-      - run: pytest --cov=envcert --cov-report=term
+      - run: ruff check envicert tests
+      - run: mypy envicert
+      - run: pytest --cov=envicert --cov-report=term
       - name: Smoke-test examples
         run: |
-          envcert check examples/safe-environment
-          envcert check examples/python-task --execution local-python --mutation
+          envicert check examples/safe-environment
+          envicert check examples/python-task --execution local-python --mutation
       - name: Build and install-check the package
         run: |
           python -m build
           python -m pip install --force-reinstall dist/*.whl
-          envcert version
-          envcert check examples/safe-environment --format json --output report.json
-          envcert verify report.json --task examples/safe-environment
+          envicert version
+          envicert check examples/safe-environment --format json --output report.json
+          envicert verify report.json --task examples/safe-environment

@@ -1,12 +1,12 @@
-# Contributing to EnvCert
+# Contributing to Envicert
 
 Thanks for helping make evaluation environments more trustworthy.
 
 ## Setup
 
 ```bash
-git clone https://github.com/EricMaxwellnetizen/envcert
-cd envcert
+git clone https://github.com/EricMaxwellnetizen/envicert
+cd envicert
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
@@ -20,11 +20,11 @@ the `dev`/`validate` extras.
 
 1. Open an issue first for new checks/adapters (use the templates).
 2. Branch, implement, add tests, update docs.
-3. Run: `pytest`, `ruff check envcert tests`, `mypy envcert`.
+3. Run: `pytest`, `ruff check envicert tests`, `mypy envicert`.
 4. Regenerate the check catalog if you touched checks:
 
 ```bash
-python -c "import pathlib; from envcert.checks.base import REGISTRY; import envcert.checks.static_checks, envcert.checks.dynamic_checks; lines=['# Check catalog','','Stable check IDs are a public interface.','']; [lines.extend([f'## {cid} - {i.title}','','- Category: '+i.category+'  |  Default severity: '+i.severity.value+'  |  Dynamic: '+str(i.dynamic),'- Description: '+i.description,'- Remediation: '+i.remediation,'- Limitations: '+(i.limitations or '(none)'),'']) for cid,(i,_) in sorted(REGISTRY.items())]; pathlib.Path('docs/architecture/CHECK_CATALOG.md').write_text(chr(10).join(lines), encoding='utf-8')"
+python -c "import pathlib; from envicert.checks.base import REGISTRY; import envicert.checks.static_checks, envicert.checks.dynamic_checks; lines=['# Check catalog','','Stable check IDs are a public interface.','']; [lines.extend([f'## {cid} - {i.title}','','- Category: '+i.category+'  |  Default severity: '+i.severity.value+'  |  Dynamic: '+str(i.dynamic),'- Description: '+i.description,'- Remediation: '+i.remediation,'- Limitations: '+(i.limitations or '(none)'),'']) for cid,(i,_) in sorted(REGISTRY.items())]; pathlib.Path('docs/architecture/CHECK_CATALOG.md').write_text(chr(10).join(lines), encoding='utf-8')"
 ```
 
 ## Guides

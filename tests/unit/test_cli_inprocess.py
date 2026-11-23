@@ -1,7 +1,7 @@
 import json
 import pathlib
 
-from envcert.cli.main import main
+from envicert.cli.main import main
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -41,9 +41,9 @@ def test_main_list_explain_schema(capsys):
     assert main(["explain", "EC060"]) == 0
     assert "EC060" in capsys.readouterr().out
     assert main(["schema"]) == 0
-    assert "EnvCert Report" in capsys.readouterr().out
+    assert "Envicert Report" in capsys.readouterr().out
     assert main(["version"]) == 0
-    from envcert import __version__
+    from envicert import __version__
 
     assert __version__ in capsys.readouterr().out
 
@@ -55,12 +55,12 @@ def test_main_no_args_is_invalid(capsys):
 
 def test_main_init(tmp_path, capsys):
     assert main(["init", str(tmp_path)]) == 0
-    assert (tmp_path / "envcert.toml").is_file()
+    assert (tmp_path / "envicert.toml").is_file()
     capsys.readouterr()
 
 
 def test_main_attest_sign_without_cosign_fails_loudly(tmp_path, capsys, monkeypatch):
-    import envcert.attestations.intoto as intoto
+    import envicert.attestations.intoto as intoto
 
     monkeypatch.setattr(intoto, "cosign_available", lambda: None)
     out = tmp_path / "r.json"
@@ -76,7 +76,7 @@ def test_main_attest_sign_without_cosign_fails_loudly(tmp_path, capsys, monkeypa
 
 
 def test_docker_runner_unavailable_is_graceful(monkeypatch):
-    from envcert.runners.docker_runner import DockerRunner
+    from envicert.runners.docker_runner import DockerRunner
 
     info = DockerRunner().info()
     # On hosts without a daemon this must report unavailable, never raise.

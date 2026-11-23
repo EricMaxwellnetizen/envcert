@@ -1,5 +1,5 @@
-from envcert.utils.dockerfile import copy_sources, image_ref_pinned, parse_dockerfile
-from envcert.utils.files import dockerignore_match
+from envicert.utils.dockerfile import copy_sources, image_ref_pinned, parse_dockerfile
+from envicert.utils.files import dockerignore_match
 
 
 def test_parse_continuations_and_comments():

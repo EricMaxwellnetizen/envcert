@@ -2,17 +2,17 @@
 
 ## Reporting a vulnerability
 
-Do **not** open a public issue for a security vulnerability in EnvCert
+Do **not** open a public issue for a security vulnerability in Envicert
 itself. Use GitHub's private vulnerability reporting ("Security →
 Advisories → Report a vulnerability") on this repository, or contact the
 maintainers via the address in the repository profile. Expect an
-acknowledgement within 7 days. EnvCert follows coordinated disclosure:
+acknowledgement within 7 days. Envicert follows coordinated disclosure:
 a fix or a documented mitigation will be prepared before public details,
 except where a vulnerability is already public.
 
 For vulnerabilities you find *in third-party benchmarks/tasks* using
-EnvCert: do not publish accusations without reproducible evidence; follow
-that project's disclosure process. EnvCert findings marked WARN / low
+Envicert: do not publish accusations without reproducible evidence; follow
+that project's disclosure process. Envicert findings marked WARN / low
 confidence are heuristics, not confirmed vulnerabilities.
 
 ## Security model (summary — full version: docs/architecture/THREAT_MODEL.md)
@@ -26,7 +26,7 @@ confidence are heuristics, not confirmed vulnerabilities.
   shared-kernel boundary, not a VM.
 - `local-python` mode has **no sandbox** and must only be used on trusted
   tasks; every report records the runner's isolation honestly.
-- EnvCert itself has zero runtime dependencies, requires no account, no
+- Envicert itself has zero runtime dependencies, requires no account, no
   network and no telemetry.
 
 ## Supported versions

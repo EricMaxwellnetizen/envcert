@@ -1,14 +1,14 @@
 # 0.4.0 real-world pilot
 
 Date: 2026-11-22. Static analysis of public material plus live Docker
-execution of EnvCert's own examples. No public project is accused of a
+execution of Envicert's own examples. No public project is accused of a
 vulnerability: adapter *templates* are not runnable tasks, and findings
 on them are methodology observations.
 
 ## Harbor repository (158 task folders, one command)
 
 Shallow-cloned `github.com/harbor-framework/harbor` and ran
-`envcert check <clone> --dataset` (static, default policy):
+`envicert check <clone> --dataset` (static, default policy):
 
 - 158 task folders found; 90 pass policy, 68 fail, 2 folders error
   gracefully (unrendered Jinja `task.toml` templates; the rollup records
@@ -28,7 +28,7 @@ Shallow-cloned `github.com/harbor-framework/harbor` and ran
 ## Terminal-Bench (51 real, rendered tasks)
 
 Downloaded `harbor-framework/terminal-bench` (main, tarball) and ran
-`envcert check tasks/ --dataset` over the 51 rendered tasks:
+`envicert check tasks/ --dataset` over the 51 rendered tasks:
 
 - Final: **32 pass / 19 fail** policy (static, default fail-on).
 - Policy drivers: EC054 agent-derived reward without evident comparison
@@ -82,7 +82,7 @@ noise; the correct disclosure outcome of a hand-review is sometimes
 ## Harbor Hub registry (15 real downloaded tasks)
 
 Installed Harbor from source and ran `harbor download
-letta-ai/frontier-memory@latest`, then `envcert check --dataset` over
+letta-ai/frontier-memory@latest`, then `envicert check --dataset` over
 the 15 rendered registry tasks: **8 pass / 7 fail**, all 7 driven by
 WARN-level EC054/EC011 review findings (no FAILs after review fixes).
 Hand-review of every driver:
@@ -93,7 +93,7 @@ Hand-review of every driver:
   read-and-parse idiom. One (awilix) reads a reward file from an
   agent-output directory but gates it on exit codes and a second
   verifier — a genuine review prompt, as intended.
-- One EC011 (`dapt-intrusion-detection`) exposed a real EnvCert bug:
+- One EC011 (`dapt-intrusion-detection`) exposed a real Envicert bug:
   FAIL fired because *some* COPY existed, although both COPYs were
   narrow file copies that provably exclude the flagged scripts.
   Inclusion is now judged per-COPY (broad/directory coverage), with
@@ -125,5 +125,5 @@ Fetched live from the Hugging Face datasets server
 ## Limitations
 
 Templates dominate the Harbor corpus; rendered registry tasks are the
-next pilot target. Docker results cover EnvCert's documented harness
+next pilot target. Docker results cover Envicert's documented harness
 layout (verifier-owned pristine tests), not every Harbor runtime mode.

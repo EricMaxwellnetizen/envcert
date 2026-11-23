@@ -4,9 +4,9 @@ Checks are pure functions from a `CheckContext` to findings. They never print
 and never execute task code (dynamic checks go through a Runner).
 
 ```python
-# envcert/checks/my_checks.py
-from envcert.checks.base import CheckInfo, check, finding, passed
-from envcert.core.models import Severity, Status
+# envicert/checks/my_checks.py
+from envicert.checks.base import CheckInfo, check, finding, passed
+from envicert.core.models import Severity, Status
 
 EC900 = CheckInfo(
     "EC900", "Example: verifier timeout is declared", "verifier", Severity.LOW,
@@ -18,7 +18,7 @@ EC900 = CheckInfo(
 @check(EC900)
 def check_verifier_timeout(c):
     if c.task.adapter != "harbor":
-        from envcert.checks.base import not_applicable
+        from envicert.checks.base import not_applicable
         return [not_applicable(EC900, "Harbor-only check.")]
     verifier = c.task.config.get("verifier") or {}
     if verifier.get("timeout_sec"):

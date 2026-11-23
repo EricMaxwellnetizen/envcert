@@ -6,12 +6,12 @@ modes execute task code only where you explicitly select them.
 ## Auditing a dataset file
 
 ```bash
-envcert check ./train.jsonl
-envcert check ./data/            # all .jsonl/.json/.csv below, split-aware
-envcert check ./rows.csv --format markdown --output audit.md
-envcert check ./rows.parquet     # needs optional pyarrow; without it the
+envicert check ./train.jsonl
+envicert check ./data/            # all .jsonl/.json/.csv below, split-aware
+envicert check ./rows.csv --format markdown --output audit.md
+envicert check ./rows.parquet     # needs optional pyarrow; without it the
                                  # file is reported uninspectable (WARN)
-envcert check ./my-task --watch  # re-check whenever the bundle changes
+envicert check ./my-task --watch  # re-check whenever the bundle changes
 ```
 
 The `dataset` adapter detects prompt fields (`prompt`,
@@ -41,7 +41,7 @@ keeps that adapter.
 ## The cheat-agent battery (EC066)
 
 Static checks infer weakness; EC066 *demonstrates* it. With an execution
-mode selected, EnvCert requires gold to pass, then plays fixed cheats:
+mode selected, Envicert requires gold to pass, then plays fixed cheats:
 
 | Scenario | Runner | Attack |
 |---|---|---|
@@ -60,8 +60,8 @@ only); docker runs use the restricted DockerRunner.
 ## Deterministic fixes
 
 ```bash
-envcert fix ./my-task           # dry-run plan
-envcert fix ./my-task --apply   # write, then re-run `envcert check`
+envicert fix ./my-task           # dry-run plan
+envicert fix ./my-task --apply   # write, then re-run `envicert check`
 ```
 
 Fixes are mechanical and idempotent: `.dockerignore` entries that keep
@@ -70,17 +70,17 @@ Fixes are mechanical and idempotent: `.dockerignore` entries that keep
 declare policy — `network_mode = "no-network"` (EC033) and verifier
 `environment_mode = "separate"` (EC020) in `task.toml`. Anything that
 needs judgement (weak assertions, leaked prose, unpinned images) stays
-a finding for a human; EnvCert does not rewrite your task with an LLM.
+a finding for a human; Envicert does not rewrite your task with an LLM.
 
 ## Scaffolding
 
 ```bash
-envcert new ./my-task --name org/my-task
-envcert check ./my-task         # passes
+envicert new ./my-task --name org/my-task
+envicert check ./my-task         # passes
 ```
 
 The scaffold starts from the safe shape — separate verifier, declared
 no-network policy, digest-pinned base image, non-root user,
 `.dockerignore`, verifier that writes reward 1 only after real pytest
-assertions, reference solution, `envcert.toml` — so new tasks do not
+assertions, reference solution, `envicert.toml` — so new tasks do not
 inherit an old task's flaws by copy-paste.

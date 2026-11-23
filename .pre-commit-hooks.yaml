@@ -1,17 +1,17 @@
-- id: envcert
-  name: EnvCert integrity check
+- id: envicert
+  name: Envicert integrity check
   description: Integrity verification and evidence for AI training/evaluation environments
-  entry: envcert check
+  entry: envicert check
   language: python
   additional_dependencies: []
   types: [directory]
   pass_filenames: true
   args: ["--fail-on", "critical,high"]
   require_serial: true
-- id: envcert-dataset
-  name: EnvCert dataset integrity check
+- id: envicert-dataset
+  name: Envicert dataset integrity check
   description: Leakage, duplication, split-overlap and label checks for JSONL/JSON/CSV datasets
-  entry: envcert check
+  entry: envicert check
   language: python
   files: \.(jsonl|json|csv)$
   pass_filenames: true

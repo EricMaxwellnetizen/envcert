@@ -10,9 +10,9 @@ import shutil
 
 import pytest
 
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
-from envcert.runners.docker_runner import DockerRunner
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
+from envicert.runners.docker_runner import DockerRunner
 
 EXAMPLES = pathlib.Path(__file__).resolve().parents[2] / "examples"
 
@@ -44,11 +44,11 @@ def test_docker_prebuilt_image_task(tmp_path):
         '[verifier]\nenvironment_mode = "separate"\n'
         '[environment]\ndocker_image = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"\nnetwork_mode = "no-network"\n',
         encoding="utf-8")
-    (task / "instruction.md").write_text("# Write the greeting\n\nCreate /app/hello.txt containing exactly `hello envcert`.\n", encoding="utf-8")
-    (task / "solution" / "solve.sh").write_text("#!/bin/bash\nmkdir -p /app\nprintf 'hello envcert\\n' > /app/hello.txt\n", encoding="utf-8")
+    (task / "instruction.md").write_text("# Write the greeting\n\nCreate /app/hello.txt containing exactly `hello envicert`.\n", encoding="utf-8")
+    (task / "solution" / "solve.sh").write_text("#!/bin/bash\nmkdir -p /app\nprintf 'hello envicert\\n' > /app/hello.txt\n", encoding="utf-8")
     (task / "tests" / "test.sh").write_text(
         "#!/bin/bash\nmkdir -p /logs/verifier\n"
-        "if grep -qx 'hello envcert' /app/hello.txt; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi\n",
+        "if grep -qx 'hello envicert' /app/hello.txt; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi\n",
         encoding="utf-8")
     settings = load_settings(None, None, {"execution": "docker"})
     report = run_checks(task, settings)
@@ -71,15 +71,15 @@ def test_docker_compose_task_executes_and_hardens(tmp_path):
         '[verifier]\nenvironment_mode = "separate"\n'
         '[environment]\nnetwork_mode = "no-network"\n',
         encoding="utf-8")
-    (task / "instruction.md").write_text("# Write the greeting\n\nCreate /app/hello.txt containing exactly `hello envcert`.\n", encoding="utf-8")
+    (task / "instruction.md").write_text("# Write the greeting\n\nCreate /app/hello.txt containing exactly `hello envicert`.\n", encoding="utf-8")
     (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
     (task / "environment" / "docker-compose.yaml").write_text(
         "services:\n  main:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    working_dir: /app\n",
         encoding="utf-8")
-    (task / "solution" / "solve.sh").write_text("#!/bin/bash\nmkdir -p /app\nprintf 'hello envcert\\n' > /app/hello.txt\n", encoding="utf-8")
+    (task / "solution" / "solve.sh").write_text("#!/bin/bash\nmkdir -p /app\nprintf 'hello envicert\\n' > /app/hello.txt\n", encoding="utf-8")
     (task / "tests" / "test.sh").write_text(
         "#!/bin/bash\nmkdir -p /logs/verifier\n"
-        "if grep -qx 'hello envcert' /app/hello.txt; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi\n",
+        "if grep -qx 'hello envicert' /app/hello.txt; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi\n",
         encoding="utf-8")
     settings = load_settings(None, None, {"execution": "docker"})
     report = run_checks(task, settings)

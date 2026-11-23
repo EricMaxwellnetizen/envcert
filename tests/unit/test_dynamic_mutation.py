@@ -1,14 +1,14 @@
 import pathlib
 
-from envcert.checks.mutation import run_mutation
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.checks.mutation import run_mutation
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 
 EXAMPLES = pathlib.Path(__file__).resolve().parents[2] / "examples"
 
 
 def test_dynamic_not_run_by_default():
-    from envcert.checks.base import REGISTRY
+    from envicert.checks.base import REGISTRY
 
     report = run_checks(EXAMPLES / "python-task", load_settings(None, None, None))
     dyn = {f["check_id"]: f["status"] for f in report["findings"] if REGISTRY[f["check_id"]][0].dynamic}

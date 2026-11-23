@@ -15,8 +15,8 @@ official docs, papers) listed below. Claims are separated into *verified*
 | Inspect AI | https://github.com/UKGovernmentBEIS/inspect_ai , https://inspect.aisi.org.uk/sandboxing.html | Evaluation framework (UK AISI): tasks = dataset + solver(s) + scorer(s); sandbox integrations (Docker built in, k8s/VM extensions); reproducibility via structured JSON logs; not a task-bundle integrity checker |
 | in-toto attestation | https://github.com/in-toto/attestation/blob/main/spec/predicates/test-result.md , spec/v1 | Statement v1 (`https://in-toto.io/Statement/v1`), vetted **Test Result** predicate (`https://in-toto.io/attestation/test-result/v0.1`, result PASSED/FAILED + configurationSource) and Simple Verification Result; DSSE envelope is the recommended signing layer |
 | Cosign / Sigstore | https://docs.sigstore.dev/cosign/verifying/attestation/ , github.com/sigstore/cosign | `cosign attest --predicate --type`, `verify-attestation` with CUE/Rego policies; attestations bind to OCI image digests; sign-blob for arbitrary files |
-| SWE-ABS | arXiv:2603.00520; proceedings.mlr.press/v306/yu26b (ICML 2026); github.com/OpenAgentEval/SWE-ABS (verified 2026-11-23) | Adversarial benchmark strengthening for test-graded (SWE-bench) instances: (1) coverage-driven test augmentation using program slicing over untested regions, (2) mutation-driven adversarial tests that pass the gold patch but fail plausible-but-incorrect mutant patches. Strengthens 50.2% of SWE-bench Verified instances and rejects 19.78% of previously passing patches. LLM/agent-driven, benchmark-specific (SWE-bench instance + test-patch format). EnvCert relation: complementary — SWE-ABS *strengthens the tests inside* one benchmark family; EnvCert audits integrity *before* that (leakage, boundary, reward provenance, dataset spec consistency EC085, verifier mutation EC063/EC064) across formats, deterministically. Nothing in EnvCert reuses SWE-ABS code; EC085's spec-consistency checks are the deterministic floor SWE-ABS-style augmentation builds on. |
-| cheating-agents (Stein et al.) | debugml.github.io/cheating-agents (2026) | Post-hoc detection of cheating across agent *traces* (what agents did), not preflight environment auditing (what environments allow). Complementary layer: EnvCert prevents, trace analysis detects. |
+| SWE-ABS | arXiv:2603.00520; proceedings.mlr.press/v306/yu26b (ICML 2026); github.com/OpenAgentEval/SWE-ABS (verified 2026-11-23) | Adversarial benchmark strengthening for test-graded (SWE-bench) instances: (1) coverage-driven test augmentation using program slicing over untested regions, (2) mutation-driven adversarial tests that pass the gold patch but fail plausible-but-incorrect mutant patches. Strengthens 50.2% of SWE-bench Verified instances and rejects 19.78% of previously passing patches. LLM/agent-driven, benchmark-specific (SWE-bench instance + test-patch format). Envicert relation: complementary — SWE-ABS *strengthens the tests inside* one benchmark family; Envicert audits integrity *before* that (leakage, boundary, reward provenance, dataset spec consistency EC085, verifier mutation EC063/EC064) across formats, deterministically. Nothing in Envicert reuses SWE-ABS code; EC085's spec-consistency checks are the deterministic floor SWE-ABS-style augmentation builds on. |
+| cheating-agents (Stein et al.) | debugml.github.io/cheating-agents (2026) | Post-hoc detection of cheating across agent *traces* (what agents did), not preflight environment auditing (what environments allow). Complementary layer: Envicert prevents, trace analysis detects. |
 
 ## Key discoveries
 
@@ -29,9 +29,9 @@ official docs, papers) listed below. Claims are separated into *verified*
    exploit* flaws, produce PoC exploits, and require API keys for their
    strongest modes. Neither is positioned as a deterministic, offline,
    CI-native checker producing a signed, schema-versioned evidence report.
-   That gap is EnvCert's position (see PRODUCT_DECISIONS.md).
+   That gap is Envicert's position (see PRODUCT_DECISIONS.md).
 3. **Harbor already solved separate verification** (`environment_mode =
-   "separate"`, fresh verifier sandbox, artifacts transfer). EnvCert must
+   "separate"`, fresh verifier sandbox, artifacts transfer). Envicert must
    *check that tasks use it* (or justify shared mode) rather than reimplement
    Harbor's runtime. Harbor also re-uploads `/tests` at verification time,
    which mitigates some — not all — shared-filesystem attacks; findings must
@@ -43,13 +43,13 @@ official docs, papers) listed below. Claims are separated into *verified*
    reward" check catches a real, common breakage class.
 6. **Attestation standards already exist.** The in-toto Test Result predicate
    expresses pass/fail + configuration source; DSSE + Cosign provide signing.
-   Inventing a new predicate would be unjustified. EnvCert binds subjects by
+   Inventing a new predicate would be unjustified. Envicert binds subjects by
    sha256 (bundle, verifier, solution) and carries tool detail in a documented
    extension field.
 7. **Established scanners are complementary, not core.** Hadolint (Dockerfile
    lint), Semgrep (taint/AST rules), Trivy/Grype/Syft (CVE/SBOM) solve adjacent
    problems. Bundling them would add heavyweight, platform-specific binaries
-   to a stdlib-only core; EnvCert instead documents them as recommended
+   to a stdlib-only core; Envicert instead documents them as recommended
    companions (SECURITY.md / guides) and keeps its own checks focused on
    evaluation integrity, which none of them cover.
 
@@ -59,7 +59,7 @@ Overlap with BenchJack/trustworthy-env: leakage, weak-verifier, isolation and
 shadowing *categories*. Differentiation: deterministic offline static checks
 with stable IDs, explicit PASS/FAIL/WARN/NOT_RUN semantics, JSON Schema +
 SARIF, policy exit codes for CI, digest-bound in-toto attestations, no LLM/API
-key, no exploit generation. EnvCert does **not** generate exploits, does not
+key, no exploit generation. Envicert does **not** generate exploits, does not
 use an LLM, and does not claim formal (Z3) proof.
 
 ## Unresolved questions
@@ -67,7 +67,7 @@ use an LLM, and does not claim formal (Z3) proof.
 - Real-world digest for the example base image (examples use a placeholder
   digest that must be replaced before actually building; documented inline).
 - Whether Harbor's registry will standardise a task "integrity" metadata
-  block that EnvCert should emit into; no such block was found in schema 1.4.
+  block that Envicert should emit into; no such block was found in schema 1.4.
 - SWE-ABS internals: resolved 2026-11-23 (see Sources table). A
   deterministic, offline analogue of its mutation stage for SWE-bench
   instances (mutant patches vs FAIL_TO_PASS, no LLM test generation) is

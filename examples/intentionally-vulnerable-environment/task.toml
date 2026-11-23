@@ -1,6 +1,6 @@
 schema_version = "1.4"
 [task]
-name = "envcert/intentionally-vulnerable"
+name = "envicert/intentionally-vulnerable"
 [verifier]
 timeout_sec = 120.0
 [environment]

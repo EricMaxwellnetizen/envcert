@@ -7,13 +7,13 @@ import sys
 
 import pytest
 
-from envcert.cli.main import main
-from envcert.core.config import Settings, load_settings
-from envcert.core.digests import bundle_digest
-from envcert.core.engine import resolve_image_digest, run_checks
-from envcert.core.errors import ConfigError
-from envcert.core.report import validate_report_consistency
-from envcert.runners.external_runner import split_runner_command
+from envicert.cli.main import main
+from envicert.core.config import Settings, load_settings
+from envicert.core.digests import bundle_digest
+from envicert.core.engine import resolve_image_digest, run_checks
+from envicert.core.errors import ConfigError
+from envicert.core.report import validate_report_consistency
+from envicert.runners.external_runner import split_runner_command
 from tests.conftest import BASIC, make_task
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -90,7 +90,7 @@ def test_unknown_check_ids_are_rejected(tmp_path, basic_task, capsys):
 
 
 def test_empty_check_selection_is_rejected(tmp_path, basic_task):
-    config = tmp_path / "envcert.toml"
+    config = tmp_path / "envicert.toml"
     config.write_text("[checks]\nenabled = []\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="must not be empty"):
         load_settings(config, None, None)
@@ -99,7 +99,7 @@ def test_empty_check_selection_is_rejected(tmp_path, basic_task):
 
 
 def test_dynamic_enabled_requires_explicit_execution(tmp_path):
-    config = tmp_path / "envcert.toml"
+    config = tmp_path / "envicert.toml"
     config.write_text("[checks.dynamic]\nenabled = true\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="explicit execution mode"):
         load_settings(config, None, None)
@@ -197,7 +197,7 @@ def test_bundle_digest_reports_truncation(tmp_path):
 
 
 def test_bundle_digest_reports_unreadable_files(monkeypatch, tmp_path):
-    import envcert.core.digests as digests
+    import envicert.core.digests as digests
 
     task = make_task(tmp_path, {"a.txt": "a"})
 

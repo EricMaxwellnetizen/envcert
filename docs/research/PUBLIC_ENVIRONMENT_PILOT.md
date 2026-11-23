@@ -12,15 +12,15 @@ reported as methodology observations, not defects.
 2. Enumerated directories containing `task.toml` + `instruction.md` +
    `tests/` ("complete" task-shaped directories): **131 found**
    (mostly `adapters/*/task-template` and `adapters/*/template`).
-3. Ran `envcert check <dir>` (profile `harbor`, static, execution `none`)
+3. Ran `envicert check <dir>` (profile `harbor`, static, execution `none`)
    on the first 12 in sorted order. Reproduce:
 
    ```bash
    git clone --depth 1 https://github.com/harbor-framework/harbor
-   envcert check harbor/adapters/aa-lcr/template
+   envicert check harbor/adapters/aa-lcr/template
    ```
 
-4. Also ran EnvCert on this repo's four controlled examples
+4. Also ran Envicert on this repo's four controlled examples
    (`examples/`), whose expected findings are fixture-locked in
    `tests/fixtures/expected-*.json`.
 
@@ -43,7 +43,7 @@ public). EC040/EC041/EC023/EC053/EC002/EC050 appeared occasionally.
 - These directories are **adapter templates** with placeholders
   (`{{image_name}}`-style values, templated instructions). Findings such as
   "no network_mode declared" or "verifier missing" on a template are
-  *expected template gaps*, not benchmark vulnerabilities. EnvCert's WARN
+  *expected template gaps*, not benchmark vulnerabilities. Envicert's WARN
   severity + confidence + limitations framing is doing its job here; a
   FAIL on a template (e.g. EC050) must be read as "not a runnable task".
 - **Improvement made because of this pilot:** unrendered templated

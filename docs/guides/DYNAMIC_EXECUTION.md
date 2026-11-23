@@ -1,7 +1,7 @@
 # Dynamic execution — safety model
 
 Dynamic checks are **opt-in** (`--execution ...`). Static analysis never
-builds or runs task code. `[checks.dynamic] enabled = true` in `envcert.toml`
+builds or runs task code. `[checks.dynamic] enabled = true` in `envicert.toml`
 does not select a mode: an explicit `[execution] mode` (or `--execution`) is
 required, so configuration cannot silently fall back to unsandboxed
 `local-python` execution.
@@ -12,7 +12,7 @@ required, so configuration cannot silently fall back to unsandboxed
 |---|---|---|---|
 | `none` (default) | Nothing. Dynamic checks return NOT_RUN. | n/a | CI static gates, untrusted bundles |
 | `docker` | Builds `environment/Dockerfile` (or the compose project, or pulls a declared `docker_image`), runs solution + verifier, reads the reward | Container with `--cap-drop ALL`, `no-new-privileges`, 2 CPU / 2 GB / 256 PIDs limits, timeout, network per flag (default none), read-only task mount, **no docker.sock**, built images removed afterwards. Compose projects get the same limits via a generated override; with network none the default compose network is marked `internal` (services talk to each other, not the internet) | Trusted-enough Harbor tasks on a host where Docker risk is accepted. Docker shares the host kernel — it is **not** a VM |
-| `local-python` | `pytest tests/` in a temp copy of the task | **None** — code runs as your user | Only tasks you wrote/trust; EnvCert's mutation & negative-control demos. Requires `pytest` in the environment running EnvCert |
+| `local-python` | `pytest tests/` in a temp copy of the task | **None** — code runs as your user | Only tasks you wrote/trust; Envicert's mutation & negative-control demos. Requires `pytest` in the environment running Envicert |
 | `external` | Your command: `<cmd> --task <dir> --variant gold\|noop --timeout <s>` → last stdout line is JSON `{"reward": ..., "exit_code": ...}` | Whatever your disposable VM/remote sandbox provides (recorded verbatim in the report) | Organisations with a real sandbox fleet; set `--runner-command` or `[execution] runner_command` |
 
 Under Docker, EC061 runs the no-op variant (reference solution skipped) and
@@ -40,15 +40,15 @@ EC065 feeds a verifier its own expected answers (gold), mutated answers and
 row-swapped answers.  Two opt-in transports:
 
 ```bash
-envcert check ./nemo-dataset --execution local-python       # import verify() in a subprocess
-envcert check ./nemo-dataset --nemo-endpoint https://gym.internal/verify
+envicert check ./nemo-dataset --execution local-python       # import verify() in a subprocess
+envicert check ./nemo-dataset --nemo-endpoint https://gym.internal/verify
 ```
 
 HTTP mode POSTs `{"response": ..., "task_data": row}` (Gym's convention) and
 reads `{"reward": ...}` or `{"score": ...}`.  It is opt-in by supplying the
 endpoint; up to 10 rows and a bounded wall-clock budget are used, responses
 are size-capped, and the endpoint/headers are never echoed into evidence
-(headers may carry credentials).  Configure headers in `envcert.toml`:
+(headers may carry credentials).  Configure headers in `envicert.toml`:
 
 ```toml
 [checks.nemo]
@@ -67,7 +67,7 @@ that did not run.
 ## Negative controls & mutation semantics
 
 - A no-op control (EC061) is a *warning* when it passes: some tasks
-  legitimately need no action. EnvCert does not hard-fail semantics it cannot
+  legitimately need no action. Envicert does not hard-fail semantics it cannot
   know.
 - Mutation rate (EC063) = rejected incorrect variants / eligible variants.
   Equivalent mutants survive legitimately; the rate is a verifier-strength
@@ -78,7 +78,7 @@ that did not run.
 
 ## High-risk workloads
 
-For genuinely hostile bundles, run EnvCert's static mode on the host and do
+For genuinely hostile bundles, run Envicert's static mode on the host and do
 dynamic runs inside a disposable VM or remote sandbox. The `Runner`
-interface (`envcert/runners/base.py`) is the extension point — see
+interface (`envicert/runners/base.py`) is the extension point — see
 WRITING_A_RUNNER.md.

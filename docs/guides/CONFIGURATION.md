@@ -1,9 +1,9 @@
 # Configuration
 
-`envcert.toml` (auto-discovered in the task directory, or `--config PATH`):
+`envicert.toml` (auto-discovered in the task directory, or `--config PATH`):
 
 ```toml
-[envcert]
+[envicert]
 profile = "harbor"        # harbor | strict | minimal | ci
 
 [checks]
@@ -29,7 +29,7 @@ fail_on = ["critical", "high"]   # severities that make the exit code 1
 ```
 
 `enabled = true` under `[checks.dynamic]` does not choose an execution mode.
-EnvCert refuses to run task code unless `[execution] mode` or `--execution`
+Envicert refuses to run task code unless `[execution] mode` or `--execution`
 explicitly selects one, so a config cannot silently fall back to unsandboxed
 local execution.
 
@@ -44,7 +44,7 @@ Profiles:
 
 CLI flags override config; config overrides profile defaults. Invalid
 profiles, severities, execution modes or repetition counts are rejected with
-exit code 2 and a specific message — EnvCert never silently ignores bad config.
+exit code 2 and a specific message — Envicert never silently ignores bad config.
 
 Dynamic execution can also be set with `[execution] mode = "docker"`, but the
 CLI flag is recommended so CI intent is explicit.

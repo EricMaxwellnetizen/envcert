@@ -1,9 +1,9 @@
 import base64
 import json
 
-from envcert.attestations.intoto import TEST_RESULT_PREDICATE, build_statement, dsse_envelope_unsigned
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.attestations.intoto import TEST_RESULT_PREDICATE, build_statement, dsse_envelope_unsigned
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 
 
 def test_statement_binds_digests(basic_task):
@@ -16,7 +16,7 @@ def test_statement_binds_digests(basic_task):
     assert subjects[report["environment"]["task_name"]] == report["environment"]["bundle_digest_sha256"]
     assert "verifier" in subjects
     assert stmt["predicate"]["result"] in ("PASSED", "FAILED")
-    assert stmt["predicate"]["x-envcert"]["signed"] is False
+    assert stmt["predicate"]["x-envicert"]["signed"] is False
 
 
 def test_dsse_envelope_unsigned_is_labelled(basic_task):
@@ -24,6 +24,6 @@ def test_dsse_envelope_unsigned_is_labelled(basic_task):
     stmt = build_statement(report, b"{}")
     env = dsse_envelope_unsigned(stmt)
     assert env["signatures"] == []
-    assert "UNSIGNED" in env["_envcert_note"]
+    assert "UNSIGNED" in env["_envicert_note"]
     decoded = json.loads(base64.b64decode(env["payload"]))
     assert decoded["predicateType"] == TEST_RESULT_PREDICATE

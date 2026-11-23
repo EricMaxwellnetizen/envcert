@@ -1,10 +1,10 @@
 import json
 
-from envcert.cli.main import validate_report
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
-from envcert.reports.sarif import to_sarif
-from envcert.reports.text import to_text
+from envicert.cli.main import validate_report
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
+from envicert.reports.sarif import to_sarif
+from envicert.reports.text import to_text
 
 
 def test_report_validates_against_schema(basic_task):
@@ -24,7 +24,7 @@ def test_sarif_structure(basic_task):
     sarif = to_sarif(report)
     assert sarif["version"] == "2.1.0"
     run = sarif["runs"][0]
-    assert run["tool"]["driver"]["name"] == "EnvCert"
+    assert run["tool"]["driver"]["name"] == "Envicert"
     assert len(run["tool"]["driver"]["rules"]) >= 20
     json.dumps(sarif)  # serialisable
 

@@ -1,6 +1,6 @@
 # Intentionally vulnerable example — do not copy
 
-This fixture deliberately contains weaknesses EnvCert should detect
+This fixture deliberately contains weaknesses Envicert should detect
 (EC010–EC014, EC020–EC023, EC030, EC032, EC040, EC052, EC053). Expected
 results are locked in `tests/fixtures/expected-intentionally-vulnerable-environment.json`.
 

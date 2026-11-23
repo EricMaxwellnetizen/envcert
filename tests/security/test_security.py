@@ -3,9 +3,9 @@ import pathlib
 
 import pytest
 
-from envcert.cli.main import main
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.cli.main import main
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -65,7 +65,7 @@ def test_large_file_does_not_crash(task_factory):
 
 def test_shell_metachars_in_path_are_not_executed(task_factory, tmp_path):
     # A task directory whose name contains shell metacharacters must be treated
-    # as a plain path (EnvCert never builds shell strings from task paths).
+    # as a plain path (Envicert never builds shell strings from task paths).
     task = task_factory({
         "task.toml": '[task]\nname = "x/y"\n',
         "instruction.md": "# T\n\nDo a meaningful verifiable thing here please.\n",

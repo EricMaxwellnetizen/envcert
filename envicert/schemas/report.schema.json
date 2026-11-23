@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EricMaxwellnetizen/envicert/schemas/report-1.0.0.json",
+  "title": "Envicert Report",
+  "type": "object",
+  "required": ["schema_version", "envicert_version", "generated_at", "environment", "execution", "checks_executed", "findings", "summary", "policy", "limitations"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "envicert_version": {"type": "string"},
+    "generated_at": {"type": "string"},
+    "assurance_context": {"type": "string"},
+    "environment": {
+      "type": "object",
+      "required": ["task_name", "adapter", "bundle_digest_sha256", "file_count"],
+      "properties": {
+        "task_name": {"type": "string"},
+        "task_path": {"type": "string"},
+        "adapter": {"type": "string", "enum": ["harbor", "generic", "nemo-gym", "inspect", "dataset"]},
+        "bundle_digest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_count": {"type": "integer", "minimum": 0},
+        "verifier_digest_sha256": {"type": ["string", "null"]},
+        "solution_digest_sha256": {"type": ["string", "null"]},
+        "image_digest": {"type": ["string", "null"]},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "execution": {"type": "object", "additionalProperties": true},
+    "checks_available": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
+    "checks_executed": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
+    "checks_not_executed": {"type": "array", "items": {"type": "string", "pattern": "^EC[0-9]{3}$"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check_id", "title", "description", "category", "severity", "status"],
+        "properties": {
+          "check_id": {"type": "string", "pattern": "^EC[0-9]{3}$"},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "category": {"type": "string"},
+          "severity": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
+          "status": {"enum": ["PASS", "FAIL", "WARN", "NOT_RUN", "NOT_APPLICABLE", "ERROR"]},
+          "artifact": {"type": "string"},
+          "path": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"]},
+          "evidence": {"type": "object"},
+          "remediation": {"type": "string"},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "limitations": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "summary": {"type": "object", "additionalProperties": true},
+    "errors": {"type": "array"},
+    "policy": {
+      "type": "object",
+      "required": ["passed", "fail_on"],
+      "properties": {"passed": {"type": "boolean"}, "fail_on": {"type": "array", "items": {"type": "string"}}},
+      "additionalProperties": true
+    },
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

@@ -4,10 +4,10 @@ import sys
 
 import pytest
 
-from envcert.attestations.intoto import build_statement, verify_statement_local
-from envcert.core.config import load_settings
-from envcert.core.engine import resolve_image_digest, run_checks
-from envcert.core.errors import ConfigError
+from envicert.attestations.intoto import build_statement, verify_statement_local
+from envicert.core.config import load_settings
+from envicert.core.engine import resolve_image_digest, run_checks
+from envicert.core.errors import ConfigError
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"
@@ -124,7 +124,7 @@ def test_external_runner_missing_command(basic_task):
 
 
 def test_richer_mutation_operators():
-    from envcert.checks.mutation import run_mutation
+    from envicert.checks.mutation import run_mutation
 
     result = run_mutation(EXAMPLES / "python-task", max_mutants=20)
     changes = " ".join(m["change"] for m in result["mutants"])
@@ -142,7 +142,7 @@ def test_mutation_print_only_tagging(tmp_path, task_factory):
         "tests/test_calc.py": "from calc import describe\ndef test_d():\n    assert describe(2, 3) == 5\n    assert describe(1, 1) == 2\n",
         "tests/test.sh": "#!/bin/bash\necho 0 > /logs/verifier/reward.txt\n",
     }
-    from envcert.checks.mutation import run_mutation
+    from envicert.checks.mutation import run_mutation
 
     result = run_mutation(task_factory(files), max_mutants=20)
     tagged = [m for m in result["mutants"] if m.get("possible_equivalent")]

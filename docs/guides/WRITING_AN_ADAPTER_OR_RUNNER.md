@@ -3,7 +3,7 @@
 ## Adapter
 
 An adapter turns a framework's on-disk layout into a `TaskContext`
-(`envcert/adapters/base.py`): file inventory, parsed config, Dockerfile,
+(`envicert/adapters/base.py`): file inventory, parsed config, Dockerfile,
 build-context directory, tests/solution/environment locations, and honest
 `warnings` for anything the adapter could not map.
 
@@ -18,7 +18,7 @@ build-context directory, tests/solution/environment locations, and honest
 
 ## Runner
 
-A runner executes tasks for dynamic checks (`envcert/runners/base.py`):
+A runner executes tasks for dynamic checks (`envicert/runners/base.py`):
 implement `info()` (availability + an honest one-line isolation description —
 this string lands in every report) and the run methods you support,
 returning `RunResult` with bounded output, timeouts and cleanup.

@@ -1,6 +1,6 @@
-site_name: EnvCert
+site_name: Envicert
 site_description: Integrity verification and evidence for AI training and evaluation environments
-repo_url: https://github.com/EricMaxwellnetizen/envcert
+repo_url: https://github.com/EricMaxwellnetizen/envicert
 theme:
   name: material
   features: [navigation.sections, search.suggest]

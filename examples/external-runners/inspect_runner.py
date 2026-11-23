@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""EnvCert external-runner example: run an Inspect AI evaluation dynamically.
+"""Envicert external-runner example: run an Inspect AI evaluation dynamically.
 
-Protocol (see envcert/runners/external_runner.py):
+Protocol (see envicert/runners/external_runner.py):
   inspect_runner.py --task <dir> --variant gold|noop --timeout <sec>
   -> last stdout line: {"reward": <float|null>, "exit_code": <int>}
 
@@ -37,7 +37,7 @@ def main() -> int:
         print(json.dumps({"error": "no Inspect @task file found"}))
         return 2
     model = os.environ.get("ENVCERT_INSPECT_MODEL", "mockllm/model")
-    log_dir = task_dir / ".envcert-inspect-logs"
+    log_dir = task_dir / ".envicert-inspect-logs"
     log_dir.mkdir(exist_ok=True)
     try:
         proc = subprocess.run(

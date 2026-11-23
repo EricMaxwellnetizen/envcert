@@ -1,6 +1,6 @@
-## EnvCert 0.4.1 — PASSED ✅
+## Envicert 0.4.1 — PASSED ✅
 
-**Task:** `envcert/python-calc` · adapter `harbor` · profile `harbor` · execution `local-python`
+**Task:** `envicert/python-calc` · adapter `harbor` · profile `harbor` · execution `local-python`
 **Bundle:** `sha256:97bec127b21955ec…` · fail-on: CRITICAL, HIGH
 
 | Status | Check | Severity | Finding |
@@ -51,4 +51,4 @@
 
 **Summary:** 43 findings {'PASS': 30, 'NOT_APPLICABLE': 10, 'NOT_RUN': 3} · policy **PASSED ✅**
 
-_EnvCert reports evidence about checked properties; it is not a certification that an environment is unhackable._
+_Envicert reports evidence about checked properties; it is not a certification that an environment is unhackable._

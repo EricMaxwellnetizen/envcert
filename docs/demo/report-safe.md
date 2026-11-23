@@ -1,6 +1,6 @@
-## EnvCert 0.4.1 — PASSED ✅
+## Envicert 0.4.1 — PASSED ✅
 
-**Task:** `envcert/hello-file` · adapter `harbor` · profile `harbor` · execution `none`
+**Task:** `envicert/hello-file` · adapter `harbor` · profile `harbor` · execution `none`
 **Bundle:** `sha256:47ac81543576f2c7…` · fail-on: CRITICAL, HIGH
 
 | Status | Check | Severity | Finding |
@@ -51,4 +51,4 @@
 
 **Summary:** 43 findings {'PASS': 25, 'NOT_APPLICABLE': 8, 'NOT_RUN': 10} · policy **PASSED ✅**
 
-_EnvCert reports evidence about checked properties; it is not a certification that an environment is unhackable._
+_Envicert reports evidence about checked properties; it is not a certification that an environment is unhackable._

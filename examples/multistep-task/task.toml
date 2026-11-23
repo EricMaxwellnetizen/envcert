@@ -1,6 +1,6 @@
 schema_version = "1.4"
 [task]
-name = "envcert/multistep-demo"
+name = "envicert/multistep-demo"
 [verifier]
 timeout_sec = 120.0
 environment_mode = "separate"

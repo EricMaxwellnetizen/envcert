@@ -1,7 +1,7 @@
 # Report schema (version 1.0.0)
 
 The canonical schema ships in the package at
-`envcert/schemas/report.schema.json` and is printed by `envcert schema`.
+`envicert/schemas/report.schema.json` and is printed by `envicert schema`.
 Generated reports are validated against it in the test suite.
 
 ## Top-level fields
@@ -9,7 +9,7 @@ Generated reports are validated against it in the test suite.
 | Field | Meaning |
 |---|---|
 | `schema_version` | `"1.0.0"` — bump on breaking report changes |
-| `envcert_version` | EnvCert release that produced the report |
+| `envicert_version` | Envicert release that produced the report |
 | `generated_at` | UTC ISO-8601 timestamp |
 | `assurance_context` | Who ran the tool (self-testing vs independent) — never conflated |
 | `environment` | `task_name`, `task_path`, `adapter`, `bundle_digest_sha256`, `file_count`, `verifier_digest_sha256`, `solution_digest_sha256`, `image_digest` (null unless a built image digest is supplied by a future runner), `warnings` |
@@ -38,14 +38,14 @@ distinct from PASS — this distinction is a core product guarantee.
 `bundle_digest_sha256`: sha256 over, for each file (sorted relative POSIX
 path, `.git` excluded, symlinks not followed): `relpath \0 sha256(content) \n`;
 symlinks contribute `link:<target>` instead of a content hash. Any content
-change changes the digest; `envcert verify report.json --task <dir>`
+change changes the digest; `envicert verify report.json --task <dir>`
 recomputes it. File-listing truncation and unreadable files are recorded in
 `environment.warnings` / `limitations` rather than silently hashed as empty.
 
-`envcert verify` also recomputes `policy.passed` and every `summary` counter
+`envicert verify` also recomputes `policy.passed` and every `summary` counter
 from the findings (using the recorded `fail_on` severities and
 `baseline_suppressed` flags). A report whose asserted policy or counts
-disagree with its own findings is rejected with exit code 2; `envcert attest`
+disagree with its own findings is rejected with exit code 2; `envicert attest`
 refuses to build an attestation from such a report.
 
 Three checks are opt-in because they need evidence the report does not carry:
@@ -65,17 +65,17 @@ detect a report whose findings were removed wholesale.
 
 ## Attestation binding (in-toto Test Result)
 
-`envcert attest report.json` emits an in-toto Statement v1:
+`envicert attest report.json` emits an in-toto Statement v1:
 
 - `predicateType`: `https://in-toto.io/attestation/test-result/v0.1`
 - `subject[]`: task name → bundle digest; `verifier` → verifier digest;
   `reference-solution` → solution digest (when present). Mutable tags/labels
   are never used as subjects.
 - `predicate.result`: PASSED/FAILED from the report policy;
-  `configurationSource.uri = envcert://profile/<profile>` with
+  `configurationSource.uri = envicert://profile/<profile>` with
   `digest.sha256 = sha256(report bytes)`, binding the statement to the exact
   report.
-- `predicate.x-envcert`: documented extension carrying EnvCert version,
+- `predicate.x-envicert`: documented extension carrying Envicert version,
   report schema version, adapter, executed/failing check IDs, assurance
   context, limitations, and `signed: false`. Rationale: the vetted Test
   Result predicate has no per-check field; the extension is additive,
@@ -85,8 +85,8 @@ detect a report whose findings were removed wholesale.
 Signing: `--dsse` wraps the statement in a DSSE envelope; `--sign` invokes
 `cosign sign-blob` and writes a detached `.sig`. If signing or OCI
 attestation was explicitly requested but could not be performed (Cosign
-missing, tlog/network failure, mutable image ref), `envcert attest` exits 3
-and says the file is unsigned. `envcert verify-attestation` verifies a
+missing, tlog/network failure, mutable image ref), `envicert attest` exits 3
+and says the file is unsigned. `envicert verify-attestation` verifies a
 detached `.sig` with `cosign verify-blob`; an unsigned statement/envelope
 fails unless `--allow-unsigned` is passed for structural-only checking.
 Without signing, output states plainly that it is unsigned and is not

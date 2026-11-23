@@ -239,7 +239,7 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 - Category: dynamic  |  Default severity on failure: CRITICAL  |  Dynamic: True
 - Description: Fixed cheat strategies (stub solution, verifier tampering, forged reward file) must not obtain a passing reward while the gold solution does.
 - Remediation: Make the verifier compute its reward from verifier-owned logic over raw artifacts: run tests from a verifier-owned directory, overwrite (never read) the reward file, and reject stub/constant submissions with substantive assertions (see EC053/EC054).
-- Limitations: Covers the listed deterministic strategies only; novel exploits need an adversarial (BenchJack-style) audit. local-python has no sandbox; docker scenarios assume the harness layout EnvCert documents.
+- Limitations: Covers the listed deterministic strategies only; novel exploits need an adversarial (BenchJack-style) audit. local-python has no sandbox; docker scenarios assume the harness layout Envicert documents.
 - Scenarios: `cheat-stub` and `cheat-tamper` (conftest outcome-faking) under local-python; `cheat-reward-forge` and `cheat-test-tamper` under docker. A cheat that passes while gold passes is an executed exploit (FAIL, high confidence), not a pattern match. When gold does not pass the battery is inconclusive (NOT_APPLICABLE).
 
 ## EC070 - Hadolint Dockerfile lint (external companion)
@@ -253,7 +253,7 @@ Stable check IDs are a public interface: IDs are never reused, and a retired che
 
 - Category: external  |  Default severity on failure: MEDIUM  |  Dynamic: False
 - Description: Runs `trivy fs` (vuln+secret scanners) on the task directory when installed and --external-tools is given. May need network for its DB on first run.
-- Remediation: Update or replace flagged dependencies/images; do not treat a clean EnvCert static run as a CVE verdict.
+- Remediation: Update or replace flagged dependencies/images; do not treat a clean Envicert static run as a CVE verdict.
 - Limitations: External tool output is mapped, not re-derived; the tool's own version and ruleset determine coverage.
 
 ## EC080 - Dataset answers are not embedded in agent-visible prompts

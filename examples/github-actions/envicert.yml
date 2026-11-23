@@ -1,0 +1,25 @@
+# Copy into .github/workflows/envicert.yml in a task repository.
+name: envicert
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  envicert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Envicert
+        run: pip install envicert
+      - name: "Check task (static, policy: fail on critical/high)"
+        run: envicert check ./my-task --format json --output envicert-report.json
+      - name: Verify report integrity
+        if: success()
+        run: envicert verify envicert-report.json --task ./my-task
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: envicert-report
+          path: envicert-report.json

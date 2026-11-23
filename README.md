@@ -1,12 +1,12 @@
-# EnvCert
+# Envicert
 
-[![PyPI](https://img.shields.io/pypi/v/envcert.svg)](https://pypi.org/project/envcert/)
-[![CI](https://github.com/EricMaxwellnetizen/envcert/actions/workflows/ci.yml/badge.svg)](https://github.com/EricMaxwellnetizen/envcert/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://ericmaxwellnetizen.github.io/envcert/)
+[![PyPI](https://img.shields.io/pypi/v/envicert.svg)](https://pypi.org/project/envicert/)
+[![CI](https://github.com/EricMaxwellnetizen/envicert/actions/workflows/ci.yml/badge.svg)](https://github.com/EricMaxwellnetizen/envicert/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://ericmaxwellnetizen.github.io/envicert/)
 
 **Integrity verification and evidence for AI training and evaluation environments.**
 
-EnvCert checks whether the thing you measure models with is trustworthy:
+Envicert checks whether the thing you measure models with is trustworthy:
 a task bundle (instruction, Docker environment, reference solution,
 verifier) or the dataset file itself (JSONL/JSON/CSV). Is the answer
 leaked to the agent? Can agent-controlled files influence the verifier?
@@ -18,7 +18,7 @@ schema-versioned reports (text/JSON/SARIF/Markdown/HTML), a cheat-agent
 battery that *proves* false passes by execution, deterministic fixes,
 and an optional digest-bound [in-toto](https://in-toto.io) attestation.
 
-EnvCert is **not** a certification authority and never claims an environment
+Envicert is **not** a certification authority and never claims an environment
 is unhackable. It is an independent, extensible verification and evidence
 layer — complementary to Harbor / NeMo Gym (which run tasks), BenchJack /
 trustworthy-env (which hunt novel exploits with AI agents), and Trivy/
@@ -39,8 +39,8 @@ else can reproduce that*.
 Requires Python 3.11+.
 
 ```bash
-pip install envcert          # from PyPI
-pipx install envcert         # or isolated
+pip install envicert          # from PyPI
+pipx install envicert         # or isolated
 # From a checkout of this repository:
 pip install .
 ```
@@ -51,27 +51,27 @@ with no Docker, account, network or API key.
 ## Quick start
 
 ```bash
-envcert check ./examples/safe-environment
-envcert check ./examples/intentionally-vulnerable-environment   # exit 1: try it
-envcert check ./my-task --format json --output report.json
-envcert check ./my-task --format sarif --output envcert.sarif
-envcert check ./my-task --format markdown --output summary.md    # PR-ready
-envcert check ./my-task --format html --output report.html       # shareable
-envcert check ./data/train.jsonl                                 # dataset files, no bundle needed
-envcert check ./my-task --execution docker                       # gold + no-op + cheat battery
-envcert fix ./my-task                                            # dry-run deterministic fixes
-envcert fix ./my-task --apply
-envcert new ./my-new-task                                        # scaffold that passes check
-envcert verify report.json --task ./my-task
-envcert list-checks
-envcert explain EC066
+envicert check ./examples/safe-environment
+envicert check ./examples/intentionally-vulnerable-environment   # exit 1: try it
+envicert check ./my-task --format json --output report.json
+envicert check ./my-task --format sarif --output envicert.sarif
+envicert check ./my-task --format markdown --output summary.md    # PR-ready
+envicert check ./my-task --format html --output report.html       # shareable
+envicert check ./data/train.jsonl                                 # dataset files, no bundle needed
+envicert check ./my-task --execution docker                       # gold + no-op + cheat battery
+envicert fix ./my-task                                            # dry-run deterministic fixes
+envicert fix ./my-task --apply
+envicert new ./my-new-task                                        # scaffold that passes check
+envicert verify report.json --task ./my-task
+envicert list-checks
+envicert explain EC066
 ```
 
 Real output (safe example, abridged):
 
 ```text
-EnvCert 0.4.5  report schema 1.0.0
-Task: envcert/hello-file  adapter=harbor  files=8
+Envicert 0.4.5  report schema 1.0.0
+Task: envicert/hello-file  adapter=harbor  files=8
 Profile: harbor  execution: none  fail_on: CRITICAL, HIGH
 
 [PASS] EC001 (INFO/PASS) Task structure is recognisable and complete
@@ -96,7 +96,7 @@ The intentionally vulnerable example produces (among others):
 ## What it checks
 
 43 checks with stable public IDs (full catalog:
-`docs/architecture/CHECK_CATALOG.md`, or `envcert list-checks -v`):
+`docs/architecture/CHECK_CATALOG.md`, or `envicert list-checks -v`):
 
 | Area | Checks | Examples |
 |---|---|---|
@@ -114,7 +114,7 @@ The intentionally vulnerable example produces (among others):
 | External companions (opt-in) | EC070–EC072 | Hadolint, Trivy, Semgrep — run only when installed and `--external-tools` is passed |
 
 Every finding carries evidence, a severity, a confidence, a remediation and
-stated limitations. Heuristics report WARN — EnvCert does not present a
+stated limitations. Heuristics report WARN — Envicert does not present a
 potential exposure as a confirmed vulnerability.
 
 ## What it cannot do
@@ -130,11 +130,11 @@ potential exposure as a confirmed vulnerability.
 ## Dynamic, cheat-battery & mutation checks (opt-in)
 
 ```bash
-envcert check ./my-harbor-task --execution docker                 # Dockerfile, compose or prebuilt image
-envcert check ./examples/python-task --execution local-python --mutation
-envcert check ./js-task --execution local-python --mutation       # JS/TS mutants too
-envcert check ./nemo-dataset --execution local-python              # local verify() probing
-envcert check ./nemo-dataset --nemo-endpoint https://gym.example/verify  # HTTP Resources Server
+envicert check ./my-harbor-task --execution docker                 # Dockerfile, compose or prebuilt image
+envicert check ./examples/python-task --execution local-python --mutation
+envicert check ./js-task --execution local-python --mutation       # JS/TS mutants too
+envicert check ./nemo-dataset --execution local-python              # local verify() probing
+envicert check ./nemo-dataset --nemo-endpoint https://gym.example/verify  # HTTP Resources Server
 # EC060 PASS gold, EC061 PASS no-op rejected, EC062 PASS repeatable, EC063 mutation rejection rate
 # EC066: deterministic cheat agents (stub solution, conftest outcome-faking,
 #        forged reward file, verifier tampering) are played against your
@@ -144,33 +144,33 @@ envcert check ./nemo-dataset --nemo-endpoint https://gym.example/verify  # HTTP 
 ## Datasets, fixes and scaffolding
 
 ```bash
-envcert check ./train.jsonl            # answers-in-prompts, duplicates, split overlap, degenerate labels
-envcert check ./data/                  # every .jsonl/.json/.csv beneath a directory (train/test aware)
-envcert fix ./my-task                  # dry-run: deterministic, idempotent remediation plan
-envcert fix ./my-task --apply          # write it (.dockerignore, declared policies), then re-check
-envcert new ./my-task --name org/my-task   # a Harbor task scaffolded to pass `envcert check`
+envicert check ./train.jsonl            # answers-in-prompts, duplicates, split overlap, degenerate labels
+envicert check ./data/                  # every .jsonl/.json/.csv beneath a directory (train/test aware)
+envicert fix ./my-task                  # dry-run: deterministic, idempotent remediation plan
+envicert fix ./my-task --apply          # write it (.dockerignore, declared policies), then re-check
+envicert new ./my-task --name org/my-task   # a Harbor task scaffolded to pass `envicert check`
 ```
 
-Pre-commit: `repo: https://github.com/EricMaxwellnetizen/envcert` with hook
-id `envcert` (tasks) or `envcert-dataset` (data files). Third-party checks
-can register under the `envcert.checks` entry-point group — no fork needed.
+Pre-commit: `repo: https://github.com/EricMaxwellnetizen/envicert` with hook
+id `envicert` (tasks) or `envicert-dataset` (data files). Third-party checks
+can register under the `envicert.checks` entry-point group — no fork needed.
 
 ## Reports, verification, attestations
 
 ```bash
-envcert check ./my-task --format json --output report.json
-envcert verify report.json --task ./my-task        # schema + consistency + bundle digest
-envcert verify report.json --task ./my-task --recheck   # + re-run the static checks and compare
-envcert verify report.json --baseline old.json     # verify the baseline suppression
-envcert schema                                     # published JSON Schema (report 1.0.0)
-envcert attest report.json --output attestation.json          # in-toto Test Result statement
-envcert attest report.json --dsse --sign --key cosign.key     # DSSE + Cosign, when installed
-envcert verify-attestation attestation.json --key cosign.pub  # verify a detached .sig
+envicert check ./my-task --format json --output report.json
+envicert verify report.json --task ./my-task        # schema + consistency + bundle digest
+envicert verify report.json --task ./my-task --recheck   # + re-run the static checks and compare
+envicert verify report.json --baseline old.json     # verify the baseline suppression
+envicert schema                                     # published JSON Schema (report 1.0.0)
+envicert attest report.json --output attestation.json          # in-toto Test Result statement
+envicert attest report.json --dsse --sign --key cosign.key     # DSSE + Cosign, when installed
+envicert verify-attestation attestation.json --key cosign.pub  # verify a detached .sig
 ```
 
 `verify` recomputes policy and summary counts from the findings, so editing
 `policy.passed` or the counters is detected; `--recheck` additionally proves
-that the report's findings are the findings EnvCert produces for the task.
+that the report's findings are the findings Envicert produces for the task.
 Reports that rely on baseline suppression must be verified with `--baseline`.
 Unsigned attestations are labelled unsigned everywhere and require
 `--allow-unsigned` for structural verification only — they are portable
@@ -180,11 +180,11 @@ extension are specified in `docs/architecture/REPORT_SCHEMA.md`.
 ## GitHub Actions
 
 ```yaml
-- uses: EricMaxwellnetizen/envcert@v0.4.5   # or @v0 for the latest 0.x
+- uses: EricMaxwellnetizen/envicert@v0.4.5   # or @v0 for the latest 0.x
   with:
     path: ./my-task
     fail-on: critical,high
-    sarif: envcert.sarif   # optional, for GitHub code scanning
+    sarif: envicert.sarif   # optional, for GitHub code scanning
 ```
 
 See `action.yml` (composite action), `examples/github-actions/` and
@@ -202,17 +202,17 @@ input/config · `3` internal/execution error.
 | Generic Docker task bundles (Dockerfile + tests/solution) | Implemented, reduced-confidence heuristics |
 | NeMo Gym datasets (dataset.toml / verifier.py / JSONL rows) | Implemented (static + local verify() probing + HTTP Resources-Server probing) — `examples/nemo-gym-dataset` |
 | Inspect AI evaluations (@task Python files) | Implemented (static) — `examples/inspect-eval` |
-| Dataset files (`.jsonl` / `.json` / `.csv`, SWE-bench/NeMo/OpenAI-style fields) | Implemented (EC080–EC085) — `envcert check data.jsonl` |
+| Dataset files (`.jsonl` / `.json` / `.csv`, SWE-bench/NeMo/OpenAI-style fields) | Implemented (EC080–EC085) — `envicert check data.jsonl` |
 
 Dynamic execution modes: `docker` (restricted), `local-python` (trusted
 pytest tasks, no sandbox), `external` (your disposable-VM/remote runner via
 a documented JSON protocol). OCI image digests can be bound with
 `--image`/`--image-digest`; Cosign OCI attestation is available via
-`envcert attest --image name@sha256:...` and `envcert verify-attestation`.
+`envicert attest --image name@sha256:...` and `envicert verify-attestation`.
 
 ## Configuration
 
-`envcert init` writes `envcert.toml` (profiles: harbor/strict/minimal/ci,
+`envicert init` writes `envicert.toml` (profiles: harbor/strict/minimal/ci,
 per-check enable/disable, `fail_on` policy). See `docs/guides/CONFIGURATION.md`.
 
 ## Adopting it
@@ -231,9 +231,9 @@ needs a triggering fixture *and* a near-miss false-positive control.
 
 ```bash
 pip install -e ".[dev]"
-pytest --cov=envcert
-ruff check envcert tests
-mypy envcert
+pytest --cov=envicert
+ruff check envicert tests
+mypy envicert
 python -m build
 ```
 

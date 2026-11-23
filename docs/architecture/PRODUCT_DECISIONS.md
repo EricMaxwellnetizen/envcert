@@ -2,7 +2,7 @@
 
 ## Position
 
-EnvCert is an **independent, extensible verification and evidence layer** for
+Envicert is an **independent, extensible verification and evidence layer** for
 the integrity of AI training/evaluation environments. It is not a Docker CVE
 scanner, not a Harbor/NeMo Gym replacement, not a BenchJack replacement, not a
 certification authority, and it never claims an environment is unhackable.
@@ -26,9 +26,9 @@ certification authority, and it never claims an environment is unhackable.
 - Composite GitHub Action + example workflows; static-only by default.
 
 ### Integrate (documented, not bundled)
-- Hadolint/Trivy/Semgrep as companion scanners in CI examples/docs — EnvCert
+- Hadolint/Trivy/Semgrep as companion scanners in CI examples/docs — Envicert
   does not reimplement CVE or generic SAST coverage.
-- Cosign for signing; Harbor/NeMo Gym for full task execution — EnvCert's
+- Cosign for signing; Harbor/NeMo Gym for full task execution — Envicert's
   docker runner is a restricted checker, not a trial runner.
 
 ### Deliberately not build (0.1.0)

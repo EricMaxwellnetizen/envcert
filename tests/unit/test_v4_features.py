@@ -1,11 +1,11 @@
-"""EnvCert 0.4.0: AST verifier analysis, cheat battery, dataset adapter,
+"""Envicert 0.4.0: AST verifier analysis, cheat battery, dataset adapter,
 deterministic fix/scaffold, markdown/HTML formats."""
 import json
 import shutil
 
-from envcert.cli.main import main
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.cli.main import main
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 from tests.conftest import BASIC
 
 
@@ -113,7 +113,7 @@ def test_ec056_flags_eval_of_variable(task_factory):
 
 
 def test_dockerfile_heredoc_and_stage_alias_not_froms():
-    from envcert.utils.dockerfile import parse_dockerfile
+    from envicert.utils.dockerfile import parse_dockerfile
 
     df = parse_dockerfile(
         "FROM python:3.12 AS base\n"
@@ -493,16 +493,16 @@ def test_ec065_local_verifier_raising_on_mutant_counts_as_rejection(task_factory
 def test_config_rejects_bad_nemo_endpoint(tmp_path):
     import pytest
 
-    from envcert.core.errors import ConfigError
+    from envicert.core.errors import ConfigError
 
-    cfg = tmp_path / "envcert.toml"
+    cfg = tmp_path / "envicert.toml"
     cfg.write_text("[checks.nemo]\nendpoint = \"ftp://example.com/verify\"\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_settings(cfg, None, None)
 
 
 def test_js_mutation_sites_skip_comments_strings_and_regex():
-    from envcert.checks.mutation_js import mutation_sites
+    from envicert.checks.mutation_js import mutation_sites
 
     src = ("// a + b\n/* c - d */\nconst s = 'a + b';\n"
            "const r = /a+b/g;\nconst x = 1 + 2;\n")
@@ -775,11 +775,11 @@ def test_ec061_standalone_inconclusive_when_gold_broken(tmp_path):
 def test_rollup_markdown_format(tmp_path, capsys):
     assert main(["check", "examples/dataset-rollup", "--dataset", "--format", "markdown"]) in (0, 1)
     out = capsys.readouterr().out
-    assert out.startswith("## EnvCert") and "| Task |" in out
+    assert out.startswith("## Envicert") and "| Task |" in out
 
 
 def test_max_mutants_setting_validated():
-    from envcert.core.errors import ConfigError
+    from envicert.core.errors import ConfigError
 
     try:
         load_settings(None, None, {"max_mutants": 0})
@@ -814,13 +814,13 @@ def test_fix_no_fixes_for_clean_task(capsys):
 
 
 def test_plugin_checks_load_via_entry_points(tmp_path, monkeypatch):
-    import envcert.core.engine as engine
-    from envcert.checks.base import REGISTRY
+    import envicert.core.engine as engine
+    from envicert.checks.base import REGISTRY
 
     plugin = tmp_path / "myplugin.py"
     plugin.write_text(
-        "from envcert.checks.base import CheckInfo, check, passed\n"
-        "from envcert.core.models import Severity\n"
+        "from envicert.checks.base import CheckInfo, check, passed\n"
+        "from envicert.core.models import Severity\n"
         "INFO = CheckInfo('EC900', 'Plugin demo check', 'plugin', Severity.LOW, 'demo', 'none')\n"
         "@check(INFO)\n"
         "def demo(c):\n"
@@ -895,7 +895,7 @@ def test_dataset_example_files_pass():
 
 
 def test_docker_cheat_solve_steps_are_deterministic():
-    from envcert.runners.docker_runner import DockerRunner
+    from envicert.runners.docker_runner import DockerRunner
 
     forge = DockerRunner._solve_step("cheat-reward-forge")
     assert "reward.txt" in forge and "echo 1" in forge
@@ -944,7 +944,7 @@ def test_fix_handles_crlf_task_toml(tmp_path):
 
 def test_new_scaffold_passes_check(tmp_path):
     dest = tmp_path / "my-task"
-    assert main(["new", str(dest), "--name", "envcert/my-task"]) == 0
+    assert main(["new", str(dest), "--name", "envicert/my-task"]) == 0
     assert main(["check", str(dest)]) == 0
 
 
@@ -954,8 +954,8 @@ def test_markdown_and_html_formats(tmp_path, capsys):
     out_md = tmp_path / "r.md"
     assert main(["check", "examples/safe-environment", "--format", "markdown", "--output", str(out_md)]) == 0
     md = out_md.read_text(encoding="utf-8")
-    assert md.startswith("## EnvCert") and "EC011" in md
+    assert md.startswith("## Envicert") and "EC011" in md
     out_html = tmp_path / "r.html"
     assert main(["check", "examples/safe-environment", "--format", "html", "--output", str(out_html)]) == 0
     html = out_html.read_text(encoding="utf-8")
-    assert html.startswith("<!DOCTYPE html>") and "envcert/hello-file" in html
+    assert html.startswith("<!DOCTYPE html>") and "envicert/hello-file" in html

@@ -8,12 +8,12 @@ EXAMPLES = ROOT / "examples"
 
 
 def run_cli(*args, cwd=ROOT):
-    return subprocess.run([sys.executable, "-m", "envcert", *args], cwd=str(cwd),
+    return subprocess.run([sys.executable, "-m", "envicert", *args], cwd=str(cwd),
                           capture_output=True, text=True, timeout=300)
 
 
 def test_version_and_list_checks():
-    from envcert import __version__
+    from envicert import __version__
 
     r = run_cli("version")
     assert r.returncode == 0 and __version__ in r.stdout
@@ -85,12 +85,12 @@ def test_sarif_output(tmp_path):
 def test_schema_command():
     r = run_cli("schema")
     assert r.returncode == 0
-    assert json.loads(r.stdout)["title"] == "EnvCert Report"
+    assert json.loads(r.stdout)["title"] == "Envicert Report"
 
 
 def test_init_and_config(tmp_path):
     r = run_cli("init", str(tmp_path))
-    assert r.returncode == 0 and (tmp_path / "envcert.toml").is_file()
+    assert r.returncode == 0 and (tmp_path / "envicert.toml").is_file()
     r = run_cli("init", str(tmp_path))
     assert r.returncode == 2  # refuses to overwrite
 

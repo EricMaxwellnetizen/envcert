@@ -13,7 +13,7 @@ runs named; anything not executed is stated as such.
   suite is run with `--cov` in CI.  The 0.4.5 modules (compose runner,
   HTTP verifier probe, JS/TS mutation, semantic dedup) are covered by
   new unit tests plus a live compose test.
-- Lint/type: `ruff check envcert tests`, `mypy envcert` clean.
+- Lint/type: `ruff check envicert tests`, `mypy envicert` clean.
 - Security self-review (Part 10.5): symlink escape (link content never
   read into reports, digest over target string), malicious/malformed
   TOML/JSON/report/attestation inputs (exit 2, never internal errors),
@@ -34,9 +34,9 @@ runs named; anything not executed is stated as such.
 
 ## Release readiness (0.4.5)
 
-- Version: package `envcert` (pyproject + `envcert/__init__.py` kept in
+- Version: package `envicert` (pyproject + `envicert/__init__.py` kept in
   lockstep; the test suite asserts the CLI reports it).
-- Installation: `pip install envcert` / `pipx install envcert`
+- Installation: `pip install envicert` / `pipx install envicert`
   (Python 3.11+, zero runtime dependencies); clean-venv install of the
   built wheel is verified before tagging.
 - Artifacts: wheel + sdist via `python -m build`, `twine check` in the
@@ -51,4 +51,4 @@ runs named; anything not executed is stated as such.
 - Publication steps (owner-run, in order): commit → `git tag -a vX.Y.Z`
   → push `main` and the tag → confirm Release workflow (build+publish)
   and CI are green → create the GitHub Release from the release notes
-  → move `v0` → verify `pip install envcert==X.Y.Z` in a clean venv.
+  → move `v0` → verify `pip install envicert==X.Y.Z` in a clean venv.

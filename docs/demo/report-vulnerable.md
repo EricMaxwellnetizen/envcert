@@ -1,6 +1,6 @@
-## EnvCert 0.4.1 — FAILED ❌
+## Envicert 0.4.1 — FAILED ❌
 
-**Task:** `envcert/intentionally-vulnerable` · adapter `harbor` · profile `harbor` · execution `none`
+**Task:** `envicert/intentionally-vulnerable` · adapter `harbor` · profile `harbor` · execution `none`
 **Bundle:** `sha256:6ec8cfe52c31688e…` · fail-on: CRITICAL, HIGH
 
 | Status | Check | Severity | Finding |
@@ -69,4 +69,4 @@
 - **EC040** Python dependencies are pinned / locked — Pin versions with == (or hashes) and commit a lockfile (uv.lock / poetry.lock / Pipfile.lock).
 - **EC053** Verifier contains substantive assertions — Assert on computed outputs/behaviour, include negative cases, and compare against expected values.
 
-_EnvCert reports evidence about checked properties; it is not a certification that an environment is unhackable._
+_Envicert reports evidence about checked properties; it is not a certification that an environment is unhackable._

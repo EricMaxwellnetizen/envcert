@@ -90,7 +90,7 @@ All notable changes are documented here (Keep a Changelog format).
   forged reward file and verifier-entrypoint tampering (docker) — are
   executed against the verifier. A cheat that passes while gold passes is
   a proven false pass (FAIL, high confidence) with no LLM involved.
-- **Dataset-file auditing (EC080–EC085 + `dataset` adapter)**: `envcert
+- **Dataset-file auditing (EC080–EC085 + `dataset` adapter)**: `envicert
   check data.jsonl` (also `.json`/`.csv`, or a directory of them) checks
   answers embedded in prompts (including `hints_text`-style auxiliary
   fields), exact/near duplicates and label conflicts, train/test split
@@ -99,12 +99,12 @@ All notable changes are documented here (Keep a Changelog format).
   across SWE-bench/NeMo/OpenAI-style conventions. NeMo Gym directories
   keep their adapter. EC054 reports LLM-judge-mediated reward flows as
   WARN rather than direct-self-grading FAIL.
-- **`envcert fix`**: deterministic, idempotent, dry-run-first remediation
+- **`envicert fix`**: deterministic, idempotent, dry-run-first remediation
   (.dockerignore entries for .git/solution/answer material; declared
   network/verifier-separation policies labelled *needs review*).
-- **`envcert new`**: scaffolds a Harbor task (separate verifier,
+- **`envicert new`**: scaffolds a Harbor task (separate verifier,
   no-network, digest-pinned image, real assertions) that passes
-  `envcert check`.
+  `envicert check`.
 - **AST data-flow verifier analysis**: EC054 now tracks reward provenance
   (file/env/argv/stdin/subprocess sources → return/reward sinks) and
   fails on rewards parsed from agent-controlled content without
@@ -116,14 +116,14 @@ All notable changes are documented here (Keep a Changelog format).
   suggested fixes and ERROR results.
 - **Adoption surface**: GitHub Action step-summary and opt-in PR
   comments; `.pre-commit-hooks.yaml`; third-party checks via the
-  `envcert.checks` entry-point group.
+  `envicert.checks` entry-point group.
 - Registry snapshot for 0.4.x (42 checks); report schema admits the
   `dataset` adapter.
 
 ### Added (pre-release)
 - `.parquet` dataset files (via optional pyarrow; without it the file is
   reported uninspectable as a WARN, never silently passed).
-- `envcert check --watch` re-runs a task check when its bundle digest
+- `envicert check --watch` re-runs a task check when its bundle digest
   changes.
 - Hand-review round over every Terminal-Bench policy driver (see
   docs/research/PILOT_040.md): EC054 trusts verifier-owned paths
@@ -171,20 +171,20 @@ All notable changes are documented here (Keep a Changelog format).
   without it, or when the flagged findings are absent from the baseline, the
   report is rejected (exit 2) instead of being accepted with a passing
   policy.
-- **Reports from EnvCert 0.1.0/0.2.0 verify again**: the consistency
+- **Reports from Envicert 0.1.0/0.2.0 verify again**: the consistency
   validator no longer requires summary counters that those versions did not
   write (0.3.0+ reports remain strictly checked).
 - `verify` no longer implies that a report's findings are complete: the
   output states that checks are not re-run unless asked.
 
 ### Added
-- `envcert verify --recheck --task <dir>`: re-runs the report's static checks
+- `envicert verify --recheck --task <dir>`: re-runs the report's static checks
   against the task and compares the findings, so findings dropped from (or
   added to) a report are detected.
-- `envcert verify --fail-on critical,high`: evaluates the policy under the
+- `envicert verify --fail-on critical,high`: evaluates the policy under the
   consumer's own severity threshold instead of the report's self-asserted
   `fail_on`; a failing policy exits 1.
-- `envcert attest --baseline <file>`: verifies baseline suppression before
+- `envicert attest --baseline <file>`: verifies baseline suppression before
   building an attestation.
 
 ## [0.3.1] - 2026-11-22
@@ -227,11 +227,11 @@ All notable changes are documented here (Keep a Changelog format).
 ### Added
 - EC065 NeMo Gym verifier probing with gold/mutated/swapped inputs
   (`--execution local-python`); EC055 Inspect scorer-strength checks.
-- Dataset rollups: `envcert check --dataset` over all task folders in a
+- Dataset rollups: `envicert check --dataset` over all task folders in a
   dataset tree, with per-task reports embedded in the JSON rollup.
 - Coverage-aware mutation: mutants on verifier-unexecuted lines are
   inconclusive and excluded from the EC063 rejection rate.
-- Report baselines (`--baseline`, SARIF suppressions) and `envcert diff`
+- Report baselines (`--baseline`, SARIF suppressions) and `envicert diff`
   trend comparison with `--strict`.
 - Inspect dynamic-runner example and keyless GHCR Cosign attestation
   workflow example; local-registry Cosign round-trip verified.
@@ -270,8 +270,8 @@ Initial public-release candidate.
 - Opt-in dynamic checks (EC060–EC062) via a restricted Docker runner or a
   labelled no-sandbox local-python runner; AST mutation testing (EC063)
   with rejection-rate reporting.
-- Reports: text, JSON (published schema 1.0.0, `envcert schema`), SARIF 2.1.0.
-- Policy profiles (harbor/strict/minimal/ci) and `envcert.toml` config.
+- Reports: text, JSON (published schema 1.0.0, `envicert schema`), SARIF 2.1.0.
+- Policy profiles (harbor/strict/minimal/ci) and `envicert.toml` config.
 - in-toto Test Result attestation generation with optional DSSE envelope
   and Cosign sign-blob; report verification with bundle-digest recomputation.
 - Composite GitHub Action, example workflows, full docs (research,

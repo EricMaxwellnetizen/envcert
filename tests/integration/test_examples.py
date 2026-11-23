@@ -1,8 +1,8 @@
 import json
 import pathlib
 
-from envcert.core.config import load_settings
-from envcert.core.engine import run_checks
+from envicert.core.config import load_settings
+from envicert.core.engine import run_checks
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
